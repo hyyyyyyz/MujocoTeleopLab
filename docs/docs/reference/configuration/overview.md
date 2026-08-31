@@ -1,0 +1,79 @@
+---
+sidebar_position: 1
+---
+
+# Configuration Overview
+
+Teleopit uses [Hydra](https://hydra.cc/) for composable configuration. Most entry points start from a top-level YAML and allow command-line overrides.
+
+Runtime assembly is centralized in `teleopit/runtime/`. Scripts, `TeleopPipeline`, and the sim2real state machine all share the same path resolution, default propagation, and dimension validation logic.
+
+## Top-Level Configs
+
+| Config | Use Case |
+|--------|----------|
+| `teleopit/configs/default.yaml` | Offline sim2sim (BVH playback) |
+| `teleopit/configs/pico4_sim.yaml` | Pico 4 VR sim2sim |
+| `teleopit/configs/sim2real.yaml` | BVH sim2real on Unitree G1 |
+| `teleopit/configs/pico4_sim2real.yaml` | Pico 4 VR sim2real on Unitree G1 |
+| `teleopit/configs/high_level_policy_sim2real.yaml` | Independent host-policy sim2real on Unitree G1 |
+
+These compose sub-configs:
+
+- `teleopit/configs/robot/g1.yaml`
+- `teleopit/configs/controller/rl_policy.yaml`
+- `teleopit/configs/input/bvh.yaml` — offline BVH input
+- `teleopit/configs/input/pico4.yaml` — Pico 4 input through the pico-bridge receiver on the Teleopit host
+
+## Override Examples
+
+### Basic Sim2Sim
+
+```bash
+python scripts/run/run_sim.py \
+    controller.policy_path=policy.onnx \
+    input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
+    policy_hz=50 \
+    pd_hz=200
+```
+
+### Change Viewers
+
+```bash
+python scripts/run/run_sim.py controller.policy_path=policy.onnx viewers=all
+python scripts/run/run_sim.py controller.policy_path=policy.onnx viewers=none
+python scripts/run/run_sim.py controller.policy_path=policy.onnx 'viewers=[retarget,sim2sim]'
+```
+
+### Enable Keyboard Playback
+
+```bash
+python scripts/run/run_sim.py \
+    controller.policy_path=policy.onnx \
+    input.bvh_file=data/sample_bvh/aiming1_subject1.bvh \
+    playback.keyboard.enabled=true
+```
+
+### Change Network Interface (sim2real)
+
+For wired PC-to-G1 control, run `ifconfig` on the PC and set this to the interface connected to the robot, such as `enp130s0`. For onboard execution on the robot computer, the default `eth0` is usually correct.
+
+```bash
+python scripts/run/run_sim2real.py \
+    controller.policy_path=policy.onnx \
+    real_robot.network_interface=enp130s0
+```
+
+## Design Principle: Fail-Fast
+
+Teleopit does not silently fix misconfigurations:
+
+- Wrong policy dimensions -> error
+- Observation definition mismatch -> error
+- Missing required paths -> error
+- Using deprecated config key `viewer` -> error
+- No auto-padding/trimming of observations
+
+When you encounter a configuration error, look for **which two components have inconsistent definitions**.
+
+For the complete field reference, see [Configuration Fields](fields).

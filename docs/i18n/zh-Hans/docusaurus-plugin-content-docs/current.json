@@ -1,0 +1,26 @@
+{
+  "version.label": {
+    "message": "当前版本",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.Getting Started": {
+    "message": "入门",
+    "description": "The label for category 'Getting Started' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Tutorials": {
+    "message": "教程",
+    "description": "The label for category 'Tutorials' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Configuration": {
+    "message": "配置",
+    "description": "The label for category 'Configuration' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Reference": {
+    "message": "参考资料",
+    "description": "The label for category 'Reference' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Resources": {
+    "message": "资源",
+    "description": "The label for category 'Resources' in sidebar 'docsSidebar'"
+  }
+}

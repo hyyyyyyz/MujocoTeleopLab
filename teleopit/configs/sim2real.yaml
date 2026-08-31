@@ -1,0 +1,164 @@
+defaults:
+  - robot: g1
+  - controller: rl_policy
+  - input: bvh
+  - _self_
+
+policy_hz: 50.0
+viewers: "none"  # Optional: set viewers=retarget to show the retargeted reference
+retarget_buffer_enabled: true
+retarget_buffer_window_s: 0.5
+retarget_buffer_delay_s: null  # null = auto use one input-frame delay for timeline sampling
+realtime_buffer_warmup_steps: 2
+reference_velocity_smoothing_alpha: 0.35
+reference_anchor_velocity_smoothing_alpha: 0.25
+reference_steps: [0]
+reference_debug_log: false
+playback:
+  pause_on_end: true
+
+console:
+  log_level: warning
+  show_timing: false
+  timing_log_interval_s: 10.0
+
+recording:
+  enabled: false
+  format: hdf5
+  output_dir: data/recordings/sim2real_hdf5
+  task: demo
+  fps: 30
+  control: terminal
+  min_episode_seconds: 1.0
+  discard_on_shutdown: true
+  record_modes: [standing, mocap, arms, pause]
+  camera:
+    enabled: true
+    key: observation.images.d435i_rgb
+    source: realsense
+    width: 640
+    height: 480
+    fps: 30
+    device: null
+  video:
+    codec: libx264
+    quality: 8
+    pixelformat: yuv420p
+
+runtime:
+  host: 127.0.0.1
+  base_port: 39700
+  start_method: spawn
+  shutdown_timeout_s: 3.0
+  pico_input_hz: 120.0
+  hand_worker_hz: 120.0
+  retarget_idle_sleep_s: 0.001
+  video_slots: 3
+  # In active MOCAP, delayed/invalid realtime references hold the last command instead of damping.
+  # max_reference_age_s only rejects entering MOCAP from STANDING on an old reference.
+  stale_reference_hold_s: 0.08
+  max_reference_age_s: 0.25
+
+# Kp ramp duration (seconds) -- gradually increases PD gains after entering STANDING
+startup_ramp_duration: 2.0
+kp_ramp_floor_ratio: 0.1
+# Faster Kp ramp used when returning from MOCAP to default STANDING with X
+standing_return_ramp_duration: 0.5
+standing_return_kp_ramp_floor_ratio: 0.5
+# Joint velocity safety limit (rad/s) -- trigger emergency damping if exceeded
+joint_vel_limit: 10.0
+
+# Optional LinkerHand control. Use only with input.provider=pico4.
+hands:
+  enabled: false
+  driver: linkerhand_l6  # linkerhand_l6 | linkerhand_o6
+  mode: gripper  # gripper | vr_hand_pose
+  sides: [left, right]
+  rate_hz: 30.0
+  frame_timeout_s: 0.3
+  linkerhand_l6:
+    left_can: can0
+    right_can: can1
+    modbus: "None"
+    trigger_deadzone: 0.05
+    deadman_threshold: 0.5
+    thumb_yaw_center: 10
+    speed: [50, 50, 50, 50, 50, 50]  # gripper mode; vr_hand_pose always uses max speed
+    open_pose: [250, 10, 250, 250, 250, 250]
+    close_pose: [79, 10, 0, 0, 0, 0]
+    print_input: false
+  linkerhand_o6:
+    left_can: can0
+    right_can: can1
+    modbus: "None"
+    trigger_deadzone: 0.05
+    deadman_threshold: 0.5
+    speed: [255, 255, 255, 255, 255, 255]
+    open_pose: [250, 250, 250, 250, 250, 250]
+    close_pose: [86, 73, 118, 111, 110, 111]
+    print_input: false
+  somehand:
+    l6_config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_l6_bihand.yaml
+    o6_config_path: third_party/somehand/configs/retargeting/bihand/linkerhand_o6_bihand.yaml
+    # Low-latency vr_hand_pose path. This favors response speed over smoothing.
+    rate_hz: 60.0
+    max_iterations: 12
+    temporal_filter_alpha: 1.0
+    output_alpha: 1.0
+
+# Optional OpenNeck active-vision gimbal control. Use only with input.provider=pico4.
+neck:
+  enabled: false
+  driver: openneck
+  config_path: null
+  port: null
+  rate_hz: 60.0
+  frame_timeout_s: 0.2
+  active_modes: [standing, mocap, arms, pause]
+  dead_zone_deg: 0.5
+  pitch_gain: 1.4
+  center_on_start: true
+  center_on_shutdown: false
+  release_on_shutdown: false
+  dry_run: false
+
+# Physical robot SDK configuration
+real_robot:
+  network_interface: "eth0"
+  # Real-robot PD gains (from mjlab g1_constants.py stiffness/damping, passed directly to SDK — no scaling)
+  kp_real: [40.2, 99.1, 40.2, 99.1, 28.5, 28.5,
+            40.2, 99.1, 40.2, 99.1, 28.5, 28.5,
+            40.2, 28.5, 28.5,
+            14.3, 14.3, 14.3, 14.3, 14.3, 16.8, 16.8,
+            14.3, 14.3, 14.3, 14.3, 14.3, 16.8, 16.8]
+  kd_real: [2.6, 6.3, 2.6, 6.3, 1.8, 1.8,
+            2.6, 6.3, 2.6, 6.3, 1.8, 1.8,
+            2.6, 1.8, 1.8,
+            0.9, 0.9, 0.9, 0.9, 0.9, 1.1, 1.1,
+            0.9, 0.9, 0.9, 0.9, 0.9, 1.1, 1.1]
+  kd_damping: 8.0      # Damping mode kd
+  control_mode: "PR"    # PR=Pitch-Roll ankle mode
+  msg_type: "HG"        # HG protocol for G1
+  # Joint position limits (from GR00T g1_29dof_gear_wbc.yaml)
+  joint_pos_lower: [-2.5307, -0.5236, -2.7576, -0.087267, -0.87267, -0.2618,
+                    -2.5307, -2.9671, -2.7576, -0.087267, -0.87267, -0.2618,
+                    -2.618, -0.52, -0.52,
+                    -3.0892, -1.5882, -2.618, -1.0472,
+                    -1.972222054, -1.61443, -1.61443,
+                    -3.0892, -2.2515, -2.618, -1.0472,
+                    -1.972222054, -1.61443, -1.61443]
+  joint_pos_upper: [2.8798, 2.9671, 2.7576, 2.8798, 0.5236, 0.2618,
+                    2.8798, 0.5236, 2.7576, 2.8798, 0.5236, 0.2618,
+                    2.618, 0.52, 0.52,
+                    2.6704, 2.2515, 2.618, 2.0944,
+                    1.972222054, 1.61443, 1.61443,
+                    2.6704, 1.5882, 2.618, 2.0944,
+                    1.972222054, 1.61443, 1.61443]
+
+# Mocap mode switching safety checks
+mocap_switch:
+  check_frames: 10   # Consecutive valid frames required before switching
+
+hydra:
+  run:
+    dir: .

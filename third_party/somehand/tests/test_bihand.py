@@ -1,0 +1,648 @@
+import pickle
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+import somehand.cli.runtime as cli_runtime
+import somehand.infrastructure.sinks as sinks_module
+import somehand.runtime.sink_outputs as runtime_sinks_output
+import somehand.runtime.sink_rendering as runtime_sink_rendering
+from somehand.cli import build_parser
+from somehand.infrastructure.artifacts import load_bihand_recording_artifact, save_bihand_recording_artifact
+from somehand.infrastructure.config_loader import load_bihand_config, load_retargeting_config
+from somehand.infrastructure.hand_model import HandModel
+from somehand.infrastructure.sources import RecordingBiHandTrackingSource, create_bihand_recording_source
+from somehand.paths import DEFAULT_BIHAND_CONFIG_PATH, DEFAULT_HC_MOCAP_REFERENCE_BVH
+from somehand.visualization import BiHandScene
+from somehand.domain import BiHandFrame, BiHandSourceFrame, HandFrame
+
+
+def _hand_frame(hand_side: str) -> HandFrame:
+    landmarks_3d = np.arange(63, dtype=np.float64).reshape(21, 3)
+    landmarks_2d = np.arange(42, dtype=np.float64).reshape(21, 2)
+    return HandFrame(
+        landmarks_3d=landmarks_3d,
+        landmarks_2d=landmarks_2d,
+        hand_side=hand_side,
+    )
+
+
+def _bihand_frame(*, left: bool = True, right: bool = True) -> BiHandFrame:
+    return BiHandFrame(
+        left=_hand_frame("left") if left else None,
+        right=_hand_frame("right") if right else None,
+    )
+
+
+class _FakeBiHandSource:
+    def __init__(self, frames):
+        self.source_desc = "fake://bihand"
+        self._frames = list(frames)
+        self._index = 0
+
+    @property
+    def fps(self) -> int:
+        return 30
+
+    def is_available(self) -> bool:
+        return self._index < len(self._frames)
+
+    def get_frame(self) -> BiHandSourceFrame:
+        frame = self._frames[self._index]
+        self._index += 1
+        return frame
+
+    def reset(self) -> bool:
+        self._index = 0
+        return True
+
+    def close(self) -> None:
+        return None
+
+    def stats_snapshot(self):
+        return {}
+
+
+def test_both_hand_selector_uses_repo_bihand_defaults():
+    parser = build_parser()
+    args = parser.parse_args(["hc-mocap", "--hand", "both"])
+
+    assert args.command == "hc-mocap"
+    assert args.hand == "both"
+    assert args.config == str(DEFAULT_BIHAND_CONFIG_PATH)
+    assert args.reference_bvh == str(DEFAULT_HC_MOCAP_REFERENCE_BVH)
+    assert args.udp_port == 1118
+
+
+def test_bihand_subcommand_is_removed():
+    parser = build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["bihand", "hc-mocap"])
+
+
+def test_bihand_config_loads_default_yaml():
+    config = load_bihand_config(str(DEFAULT_BIHAND_CONFIG_PATH))
+
+    assert config.left_config_path.endswith("configs/retargeting/left/linkerhand_l20_left.yaml")
+    assert config.right_config_path.endswith("configs/retargeting/right/linkerhand_l20_right.yaml")
+    assert config.viewer.panel_width == 640
+    assert config.viewer.left_pos == (0.22, 0.04, 0.02)
+    assert config.viewer.right_pos == (-0.22, 0.04, 0.02)
+    assert config.viewer.camera_lookat == (0.0, 0.04, 0.02)
+    assert config.viewer.left_quat == (0.69288325, 0.01522078, -0.05862347, 0.71850151)
+    assert config.viewer.right_quat == (0.71846417, 0.05829359, -0.01490552, 0.69295665)
+
+
+def test_all_paired_side_specific_configs_have_bihand_yaml():
+    left_models = {path.stem.removesuffix("_left") for path in Path("configs/retargeting/left").glob("*_left.yaml")}
+    right_models = {path.stem.removesuffix("_right") for path in Path("configs/retargeting/right").glob("*_right.yaml")}
+    bihand_models = {path.stem.removesuffix("_bihand") for path in Path("configs/retargeting/bihand").glob("*_bihand.yaml")}
+
+    assert sorted(left_models & right_models) == sorted(bihand_models)
+
+
+def test_all_bihand_configs_load_successfully():
+    config_paths = sorted(Path("configs/retargeting/bihand").glob("*_bihand.yaml"))
+    assert config_paths
+    for config_path in config_paths:
+        config = load_bihand_config(str(config_path))
+        left_config = load_retargeting_config(config.left_config_path)
+        right_config = load_retargeting_config(config.right_config_path)
+        assert left_config.hand.side == "left"
+        assert right_config.hand.side == "right"
+
+
+def test_build_bihand_session_adds_replay_video_sink(monkeypatch):
+    created = {}
+
+    class _FakeVideoSink:
+        def __init__(
+            self,
+            left_hand_model,
+            right_hand_model,
+            *,
+            output_path,
+            fps,
+            panel_width,
+            panel_height,
+            left_pos,
+            right_pos,
+            camera_lookat,
+            left_quat,
+            right_quat,
+        ):
+            created["left_hand_model"] = left_hand_model
+            created["right_hand_model"] = right_hand_model
+            created["output_path"] = output_path
+            created["fps"] = fps
+            created["panel_width"] = panel_width
+            created["panel_height"] = panel_height
+            created["left_pos"] = left_pos
+            created["right_pos"] = right_pos
+            created["camera_lookat"] = camera_lookat
+            created["left_quat"] = left_quat
+            created["right_quat"] = right_quat
+
+        @property
+        def is_running(self):
+            return True
+
+        def on_result(self, result):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(cli_runtime, "BiHandVideoOutputSink", _FakeVideoSink)
+
+    engine = SimpleNamespace(
+        left_engine=SimpleNamespace(hand_model=object()),
+        right_engine=SimpleNamespace(hand_model=object()),
+        config=SimpleNamespace(
+            viewer=SimpleNamespace(
+                panel_width=600,
+                panel_height=400,
+                window_name="test",
+                left_pos=(-0.3, 0.05, 0.01),
+                right_pos=(0.3, 0.05, 0.01),
+                camera_lookat=(0.0, 0.05, 0.01),
+                left_quat=(0.1, 0.2, 0.3, 0.4),
+                right_quat=(0.5, 0.6, 0.7, 0.8),
+            )
+        ),
+    )
+    session = cli_runtime.build_bihand_session(
+        engine,
+        visualize=False,
+        show_preview=False,
+        video_output_path="recordings/bihand.mp4",
+        video_output_fps=30,
+    )
+
+    assert len(session.sinks) == 1
+    assert created == {
+        "left_hand_model": engine.left_engine.hand_model,
+        "right_hand_model": engine.right_engine.hand_model,
+        "output_path": "recordings/bihand.mp4",
+        "fps": 30,
+        "panel_width": 600,
+        "panel_height": 400,
+        "left_pos": (-0.3, 0.05, 0.01),
+        "right_pos": (0.3, 0.05, 0.01),
+        "camera_lookat": (0.0, 0.05, 0.01),
+        "left_quat": (0.1, 0.2, 0.3, 0.4),
+        "right_quat": (0.5, 0.6, 0.7, 0.8),
+    }
+
+
+def test_build_bihand_session_adds_landmark_frame_sink(monkeypatch):
+    created = {}
+
+    def _fake_frame_sink(**kwargs):
+        created.update(kwargs)
+        return "frame_sink"
+
+    monkeypatch.setattr(cli_runtime, "AsyncBiHandLandmarkOutputSink", _fake_frame_sink)
+    monkeypatch.setattr(cli_runtime, "BiHandOutputWindowSink", lambda *args, **kwargs: "result_sink")
+
+    engine = SimpleNamespace(
+        left_engine=SimpleNamespace(
+            hand_model=object(),
+            config=SimpleNamespace(
+                hand=SimpleNamespace(side="left"),
+                human_vector_pairs=[(0, 1)],
+                vector_constraints=[],
+            ),
+        ),
+        right_engine=SimpleNamespace(
+            hand_model=object(),
+            config=SimpleNamespace(
+                hand=SimpleNamespace(side="right"),
+                human_vector_pairs=[(0, 5)],
+                vector_constraints=[],
+            ),
+        ),
+        config=SimpleNamespace(
+            viewer=SimpleNamespace(
+                panel_width=600,
+                panel_height=400,
+                window_name="test",
+                left_pos=(0.3, 0.05, 0.01),
+                right_pos=(-0.3, 0.05, 0.01),
+                camera_lookat=(0.0, 0.05, 0.01),
+                left_quat=(0.1, 0.2, 0.3, 0.4),
+                right_quat=(0.5, 0.6, 0.7, 0.8),
+            )
+        ),
+    )
+
+    session = cli_runtime.build_bihand_session(
+        engine,
+        visualize=True,
+        show_preview=False,
+    )
+
+    assert session.frame_sinks == ["frame_sink"]
+    assert session.sinks == ["result_sink"]
+    assert created == {
+        "left_pos": (0.3, 0.05, 0.01),
+        "right_pos": (-0.3, 0.05, 0.01),
+        "left_quat": (0.1, 0.2, 0.3, 0.4),
+        "right_quat": (0.5, 0.6, 0.7, 0.8),
+        "left_vector_pairs": None,
+        "right_vector_pairs": None,
+        "left_distance_pairs": None,
+        "right_distance_pairs": None,
+        "left_frame_triples": None,
+        "right_frame_triples": None,
+        "left_angle_triples": None,
+        "right_angle_triples": None,
+    }
+
+
+def test_build_bihand_session_passes_diagnostic_settings(monkeypatch):
+    frame_created = {}
+    result_created = {}
+
+    def _fake_frame_sink(**kwargs):
+        frame_created.update(kwargs)
+        return "frame_sink"
+
+    def _fake_result_sink(*args, **kwargs):
+        result_created.update(kwargs)
+        return "result_sink"
+
+    monkeypatch.setattr(cli_runtime, "AsyncBiHandLandmarkOutputSink", _fake_frame_sink)
+    monkeypatch.setattr(cli_runtime, "BiHandOutputWindowSink", _fake_result_sink)
+
+    engine = SimpleNamespace(
+        left_engine=SimpleNamespace(
+            hand_model="left_model",
+            config=SimpleNamespace(
+                hand=SimpleNamespace(side="left"),
+                human_vector_pairs=[(0, 1)],
+                vector_constraints=[
+                    SimpleNamespace(robot=["world", "palm"], robot_types=["body", "body"]),
+                    SimpleNamespace(robot=["palm", "tip"], robot_types=["body", "site"]),
+                ],
+                distance_constraints=[
+                    SimpleNamespace(human=[2, 3], robot=["a", "b"], robot_types=["site", "site"]),
+                ],
+                frame_constraints=[
+                    SimpleNamespace(
+                        human_origin=0,
+                        human_primary=5,
+                        human_secondary=9,
+                        robot_origin="palm",
+                        robot_primary="index",
+                        robot_secondary="middle",
+                        robot_types=["body", "site", "site"],
+                    )
+                ],
+                angle_constraints=[SimpleNamespace(landmarks=[1, 2, 3], joint="left_joint")],
+            ),
+        ),
+        right_engine=SimpleNamespace(
+            hand_model="right_model",
+            config=SimpleNamespace(
+                hand=SimpleNamespace(side="right"),
+                human_vector_pairs=[(0, 5)],
+                vector_constraints=[
+                    SimpleNamespace(robot=["base", "tip"], robot_types=["body", "site"]),
+                ],
+                distance_constraints=[
+                    SimpleNamespace(human=[4, 6], robot=["c", "d"], robot_types=["site", "site"]),
+                ],
+                frame_constraints=[],
+                angle_constraints=[SimpleNamespace(landmarks=[3, 4, 5], joint="right_joint")],
+            ),
+        ),
+        config=SimpleNamespace(
+            viewer=SimpleNamespace(
+                panel_width=600,
+                panel_height=400,
+                window_name="test",
+                left_pos=(0.3, 0.05, 0.01),
+                right_pos=(-0.3, 0.05, 0.01),
+                camera_lookat=(0.0, 0.05, 0.01),
+                left_quat=(0.1, 0.2, 0.3, 0.4),
+                right_quat=(0.5, 0.6, 0.7, 0.8),
+            )
+        ),
+    )
+
+    session = cli_runtime.build_bihand_session(
+        engine,
+        viewer_mode="diagnostic",
+        visualize=True,
+        show_preview=False,
+    )
+
+    assert session.frame_sinks == ["frame_sink"]
+    assert session.sinks == ["result_sink"]
+    assert frame_created["left_vector_pairs"] == [(0, 1)]
+    assert frame_created["right_vector_pairs"] == [(0, 5)]
+    assert frame_created["left_distance_pairs"] == [(2, 3)]
+    assert frame_created["right_distance_pairs"] == [(4, 6)]
+    assert frame_created["left_frame_triples"] == [(0, 5, 9)]
+    assert frame_created["right_frame_triples"] == []
+    assert frame_created["left_angle_triples"] == [(1, 2, 3)]
+    assert frame_created["right_angle_triples"] == [(3, 4, 5)]
+    assert result_created["viewer_mode"] == "diagnostic"
+    assert result_created["left_hand_side"] == "left"
+    assert result_created["right_hand_side"] == "right"
+    assert result_created["left_robot_vector_specs"] == [(1, "palm", "body", "tip", "site")]
+    assert result_created["right_robot_vector_specs"] == [(0, "base", "body", "tip", "site")]
+    assert result_created["left_robot_distance_specs"] == [(0, "a", "site", "b", "site")]
+    assert result_created["right_robot_distance_specs"] == [(0, "c", "site", "d", "site")]
+    assert result_created["left_robot_frame_specs"] == [(0, "palm", "body", "index", "site", "middle", "site")]
+    assert result_created["right_robot_frame_specs"] == []
+    assert result_created["left_robot_angle_specs"] == [(0, "left_joint")]
+    assert result_created["right_robot_angle_specs"] == [(0, "right_joint")]
+
+
+def test_bihand_output_window_sink_uses_mujoco_visualizer(monkeypatch):
+    created = {}
+
+    class _FakeVisualizer:
+        def __init__(
+            self,
+            left_hand_model,
+            right_hand_model,
+            *,
+            key_callback=None,
+            left_pos=None,
+            right_pos=None,
+            camera_lookat=None,
+            left_quat=None,
+            right_quat=None,
+            **kwargs,
+        ):
+            created["left_hand_model"] = left_hand_model
+            created["right_hand_model"] = right_hand_model
+            created["key_callback"] = key_callback
+            created["left_pos"] = left_pos
+            created["right_pos"] = right_pos
+            created["camera_lookat"] = camera_lookat
+            created["left_quat"] = left_quat
+            created["right_quat"] = right_quat
+            created["kwargs"] = kwargs
+            self.updated = []
+
+        @property
+        def is_running(self):
+            return True
+
+        def update(self, left_qpos, right_qpos, **kwargs):
+            self.updated.append((left_qpos, right_qpos, kwargs))
+
+        def close(self):
+            created["closed"] = True
+
+    monkeypatch.setattr(runtime_sinks_output, "BiHandVisualizer", _FakeVisualizer)
+
+    sink = sinks_module.BiHandOutputWindowSink(
+        left_hand_model="left_model",
+        right_hand_model="right_model",
+        key_callback="handler",
+        left_pos=(-0.25, 0.03, 0.01),
+        right_pos=(0.25, 0.03, 0.01),
+        camera_lookat=(0.0, 0.03, 0.01),
+        left_quat=(0.11, 0.22, 0.33, 0.44),
+        right_quat=(0.55, 0.66, 0.77, 0.88),
+    )
+    result = SimpleNamespace(
+        left=SimpleNamespace(qpos=np.array([1.0]), target_directions=np.array([[1.0, 0.0, 0.0]])),
+        right=SimpleNamespace(qpos=np.array([2.0]), target_directions=np.array([[0.0, 1.0, 0.0]])),
+    )
+    sink.on_result(result)
+    sink.close()
+
+    assert created["left_hand_model"] == "left_model"
+    assert created["right_hand_model"] == "right_model"
+    assert created["key_callback"] == "handler"
+    assert created["left_pos"] == (-0.25, 0.03, 0.01)
+    assert created["right_pos"] == (0.25, 0.03, 0.01)
+    assert created["camera_lookat"] == (0.0, 0.03, 0.01)
+    assert created["left_quat"] == (0.11, 0.22, 0.33, 0.44)
+    assert created["right_quat"] == (0.55, 0.66, 0.77, 0.88)
+    assert created["closed"] is True
+
+
+def test_bihand_recording_wrapper_captures_detected_frames_only():
+    wrapped = RecordingBiHandTrackingSource(
+        _FakeBiHandSource(
+            [
+                BiHandSourceFrame(detection=_bihand_frame(left=True, right=False)),
+                BiHandSourceFrame(detection=None),
+                BiHandSourceFrame(detection=_bihand_frame(left=False, right=True)),
+            ]
+        )
+    )
+
+    while wrapped.is_available():
+        wrapped.get_frame()
+
+    assert len(wrapped.recorded_frames) == 2
+    assert wrapped.recorded_frames[0].left is not None
+    assert wrapped.recorded_frames[0].right is None
+    assert wrapped.recorded_frames[1].left is None
+    assert wrapped.recorded_frames[1].right is not None
+
+
+def test_bihand_landmark_output_sink_applies_scene_pose(monkeypatch):
+    updates = []
+
+    class _FakeVisualizer:
+        @property
+        def is_running(self):
+            return True
+
+        def update(self, landmarks):
+            updates.append(landmarks)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(runtime_sinks_output, "AsyncBiHandLandmarkVisualizer", lambda **kwargs: _FakeVisualizer())
+    monkeypatch.setattr(
+        runtime_sinks_output,
+        "preprocess_landmarks",
+        lambda landmarks, hand_side: np.asarray(landmarks, dtype=np.float64) + (1.0 if hand_side == "left" else 2.0),
+    )
+
+    half_sqrt2 = float(np.sqrt(0.5))
+    sink = sinks_module.AsyncBiHandLandmarkOutputSink(
+        left_pos=(-0.3, 0.05, 0.01),
+        right_pos=(0.3, 0.05, 0.01),
+        left_quat=(0.0, 0.0, 0.0, 1.0),
+        right_quat=(half_sqrt2, 0.0, 0.0, half_sqrt2),
+    )
+    sink.on_frame(_bihand_frame(left=True, right=True))
+
+    assert len(updates) == 1
+    assert updates[0].shape == (2, 21, 3)
+    left_input = _hand_frame("left").landmarks_3d + 1.0
+    right_input = _hand_frame("right").landmarks_3d + 2.0
+    left_rotation = np.array(
+        [
+            [-1.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    right_rotation = np.array(
+        [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    np.testing.assert_allclose(updates[0][0], left_input @ left_rotation.T + np.array([-0.3, 0.05, 0.01]))
+    np.testing.assert_allclose(updates[0][1], right_input @ right_rotation.T + np.array([0.3, 0.05, 0.01]))
+
+
+def test_bihand_recording_artifact_roundtrip(tmp_path):
+    recording_path = tmp_path / "bihand.pkl"
+    frames = [_bihand_frame(left=True, right=True), _bihand_frame(left=True, right=False)]
+
+    save_bihand_recording_artifact(
+        str(recording_path),
+        frames,
+        source_fps=60,
+        source_desc="pico://both",
+        input_type="pico",
+        num_frames=3,
+        num_detected=2,
+    )
+
+    payload = load_bihand_recording_artifact(str(recording_path))
+
+    assert payload["fps"] == 60
+    assert payload["input_source"] == "pico://both"
+    assert payload["input_type"] == "pico"
+    assert payload["num_frames"] == 3
+    assert payload["num_detected"] == 2
+    assert len(payload["frames"]) == 2
+    assert payload["frames"][1].left is not None
+    assert payload["frames"][1].right is None
+
+
+def test_bihand_recording_artifact_rejects_legacy_format(tmp_path):
+    recording_path = tmp_path / "legacy.pkl"
+    with recording_path.open("wb") as file_obj:
+        pickle.dump({"format": "dex_mujoco.bihand_recording.v1"}, file_obj)
+
+    with pytest.raises(ValueError, match="Unsupported bi-hand recording format"):
+        load_bihand_recording_artifact(str(recording_path))
+
+
+def test_bihand_recording_source_replays_saved_frames(tmp_path):
+    recording_path = tmp_path / "bihand.pkl"
+    frames = [_bihand_frame(left=True, right=True), _bihand_frame(left=False, right=True)]
+
+    save_bihand_recording_artifact(
+        str(recording_path),
+        frames,
+        source_fps=50,
+        source_desc="udp://0.0.0.0:1118",
+        input_type="hc_mocap",
+        num_frames=2,
+        num_detected=2,
+    )
+
+    source = create_bihand_recording_source(recording_path=str(recording_path))
+    seen = []
+
+    while source.is_available():
+        seen.append(source.get_frame().detection)
+
+    assert source.fps == 50
+    assert source.recording_metadata["input_type"] == "hc_mocap"
+    assert len(seen) == 2
+    assert seen[0] is not frames[0]
+    assert seen[0].left is not None
+    assert seen[0].right is not None
+
+
+def test_bihand_scene_compiles_combined_mujoco_model():
+    config = load_bihand_config(str(DEFAULT_BIHAND_CONFIG_PATH))
+    left_hand_model = HandModel(load_retargeting_config(config.left_config_path).hand.mjcf_path)
+    right_hand_model = HandModel(load_retargeting_config(config.right_config_path).hand.mjcf_path)
+    scene = BiHandScene(left_hand_model, right_hand_model)
+
+    assert scene.model.nq == left_hand_model.nq + right_hand_model.nq
+    assert scene.model.nu == left_hand_model.nu + right_hand_model.nu
+    assert scene.left_qpos_indices.shape[0] == left_hand_model.nq
+    assert scene.right_qpos_indices.shape[0] == right_hand_model.nq
+
+
+def test_bihand_scene_applies_configured_root_quaternions():
+    config = load_bihand_config(str(DEFAULT_BIHAND_CONFIG_PATH))
+    left_hand_model = HandModel(load_retargeting_config(config.left_config_path).hand.mjcf_path)
+    right_hand_model = HandModel(load_retargeting_config(config.right_config_path).hand.mjcf_path)
+    scene = BiHandScene(
+        left_hand_model,
+        right_hand_model,
+        left_quat=config.viewer.left_quat,
+        right_quat=config.viewer.right_quat,
+    )
+
+    assert np.allclose(scene.model.body_quat[1], np.array(config.viewer.left_quat))
+    right_body_id = scene.model.nbody - (right_hand_model.model.nbody - 1)
+    assert np.allclose(scene.model.body_quat[right_body_id], np.array(config.viewer.right_quat))
+
+
+def test_bihand_render_helper_uses_front_palm_camera(monkeypatch):
+    calls = []
+
+    class _FakeRenderer:
+        def update_scene(self, data, camera):
+            return None
+
+        def render(self):
+            return np.zeros((2, 2, 3), dtype=np.uint8)
+
+        def close(self):
+            return None
+
+    class _FakeScene:
+        def __init__(self, left_hand_model, right_hand_model, *, left_pos, right_pos, left_quat, right_quat):
+            self.model = SimpleNamespace(vis=SimpleNamespace(global_=SimpleNamespace(offwidth=640, offheight=480)))
+            self.data = object()
+
+        def update(self, left_qpos, right_qpos):
+            return None
+
+    monkeypatch.setattr(runtime_sink_rendering, "BiHandScene", _FakeScene)
+    monkeypatch.setattr(runtime_sink_rendering, "create_offscreen_renderer", lambda model, *, width, height: _FakeRenderer())
+    monkeypatch.setattr(runtime_sink_rendering.mujoco, "MjvCamera", lambda: SimpleNamespace())
+    monkeypatch.setattr(runtime_sink_rendering.mujoco, "mjv_defaultCamera", lambda camera: None)
+    monkeypatch.setattr(runtime_sink_rendering, "configure_free_camera", lambda camera, **kwargs: None)
+
+    def _fake_try_frame_hand_camera(camera, *, model, data, aspect_ratio=None, azimuth=None, elevation=None):
+        calls.append((azimuth, elevation))
+        return True
+
+    monkeypatch.setattr(runtime_sink_rendering, "try_frame_hand_camera", _fake_try_frame_hand_camera)
+
+    helper = runtime_sink_rendering.BiHandRenderHelper(
+        left_hand_model=object(),
+        right_hand_model=object(),
+        panel_width=640,
+        panel_height=480,
+        left_pos=(0.22, 0.04, 0.02),
+        right_pos=(-0.22, 0.04, 0.02),
+        camera_lookat=(0.0, 0.04, 0.02),
+        left_quat=(0.1, 0.2, 0.3, 0.4),
+        right_quat=(0.5, 0.6, 0.7, 0.8),
+    )
+    helper.render(SimpleNamespace(left=SimpleNamespace(qpos=np.array([1.0])), right=SimpleNamespace(qpos=np.array([2.0]))))
+
+    assert calls == [(-90.0, -5.0)]

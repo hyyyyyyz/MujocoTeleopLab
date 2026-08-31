@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Pico simulation control state machine</title>
+  <desc id="desc">Keyboard Y starts a live session, keyboard or Pico controller B switches between whole-body and arms-only control, keyboard or Pico controller A pauses, keyboard X returns to standing, and keyboard Q quits.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#475569"/>
+    </marker>
+    <style>
+      text { font-family: Inter, Arial, sans-serif; }
+      .title { font-size: 28px; font-weight: 700; fill: #0f172a; }
+      .group-label { font-size: 15px; font-weight: 700; fill: #475569; letter-spacing: .05em; }
+      .state-title { font-size: 21px; font-weight: 700; fill: #0f172a; }
+      .state-copy { font-size: 14px; fill: #475569; }
+      .label { font-size: 14px; font-weight: 600; fill: #334155; }
+      .hint { font-size: 15px; font-weight: 600; fill: #334155; }
+      .arrow { fill: none; stroke: #475569; stroke-width: 2.5; marker-end: url(#arrow); }
+      .both { fill: none; stroke: #475569; stroke-width: 2.5; marker-start: url(#arrow); marker-end: url(#arrow); }
+      .branch { fill: none; stroke: #94a3b8; stroke-width: 2.5; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="620" rx="20" fill="#f8fafc"/>
+  <text x="60" y="52" class="title">Simulation control</text>
+
+  <rect x="60" y="72" width="130" height="30" rx="15" fill="#dbeafe"/>
+  <text x="125" y="92" class="label" text-anchor="middle">Keyboard</text>
+  <rect x="202" y="72" width="158" height="30" rx="15" fill="#ede9fe"/>
+  <text x="281" y="92" class="label" text-anchor="middle">Pico controller</text>
+
+  <rect x="390" y="78" width="750" height="474" rx="22" fill="#ffffff" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 7"/>
+  <text x="416" y="111" class="group-label">LIVE VR SESSION</text>
+
+  <rect x="62" y="220" width="238" height="104" rx="18" fill="#e0f2fe" stroke="#0284c7" stroke-width="2.5"/>
+  <circle cx="91" cy="246" r="8" fill="#0284c7"/>
+  <text x="181" y="263" class="state-title" text-anchor="middle">STANDING</text>
+  <text x="181" y="291" class="state-copy" text-anchor="middle">Standing pose · tracking inactive</text>
+
+  <rect x="430" y="158" width="230" height="98" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+  <circle cx="459" cy="184" r="8" fill="#16a34a"/>
+  <text x="545" y="200" class="state-title" text-anchor="middle">MOCAP</text>
+  <text x="545" y="228" class="state-copy" text-anchor="middle">Whole-body tracking</text>
+
+  <rect x="850" y="158" width="230" height="98" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="2.5"/>
+  <circle cx="879" cy="184" r="8" fill="#d97706"/>
+  <text x="965" y="200" class="state-title" text-anchor="middle">ARMS</text>
+  <text x="965" y="228" class="state-copy" text-anchor="middle">Live arms · standing body</text>
+
+  <rect x="640" y="414" width="250" height="100" rx="18" fill="#f1f5f9" stroke="#64748b" stroke-width="2.5"/>
+  <circle cx="669" cy="440" r="8" fill="#64748b"/>
+  <text x="765" y="456" class="state-title" text-anchor="middle">PAUSED</text>
+  <text x="765" y="484" class="state-copy" text-anchor="middle">Hold the current reference</text>
+
+  <path d="M300 248 C345 248 370 207 430 207" class="arrow"/>
+  <rect x="292" y="172" width="121" height="28" rx="14" fill="#dbeafe"/>
+  <text x="352" y="191" class="label" text-anchor="middle">Keyboard Y</text>
+
+  <path d="M390 311 C354 311 337 292 300 292" class="arrow"/>
+  <rect x="301" y="329" width="168" height="28" rx="14" fill="#dbeafe"/>
+  <text x="385" y="348" class="label" text-anchor="middle">Keyboard X · end</text>
+
+  <path d="M660 207 L850 207" class="both"/>
+  <rect x="667" y="122" width="196" height="28" rx="14" fill="#eef2ff"/>
+  <text x="765" y="141" class="label" text-anchor="middle">Keyboard B · Pico B</text>
+
+  <path d="M545 256 C545 307 670 302 750 344" class="branch"/>
+  <path d="M965 256 C965 307 860 302 780 344" class="branch"/>
+  <circle cx="765" cy="345" r="5" fill="#64748b"/>
+  <path d="M765 350 L765 414" class="both"/>
+  <rect x="806" y="342" width="217" height="28" rx="14" fill="#eef2ff"/>
+  <text x="914" y="361" class="label" text-anchor="middle">Keyboard A · Pico A</text>
+
+  <rect x="60" y="570" width="1080" height="34" rx="17" fill="#e2e8f0"/>
+  <text x="600" y="592" class="hint" text-anchor="middle">Keyboard Q · Quit the simulation from any state</text>
+</svg>

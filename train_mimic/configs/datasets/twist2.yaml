@@ -1,0 +1,21 @@
+name: twist2
+target_fps: 30
+preprocess:
+  min_frames: 22
+  normalize_root_xy: true
+  ground_align: none
+  max_all_off_ground_s: 0.8
+  off_ground_height: 0.12
+sources:
+  - name: OMOMO_g1_GMR
+    type: pkl
+    input: data/twist2_retarget_pkl/OMOMO_g1_GMR
+  - name: AMASS_g1_GMR8
+    type: pkl
+    input: data/twist2_retarget_pkl/AMASS_g1_GMR8
+  - name: twist1_to_twist2
+    type: pkl
+    input: data/twist2_retarget_pkl/twist1_to_twist2
+  - name: v1_v2_v3_g1
+    type: pkl
+    input: data/twist2_retarget_pkl/v1_v2_v3_g1

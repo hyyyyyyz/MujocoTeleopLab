@@ -1,0 +1,6 @@
+extends: "../base/dexhand021.yaml"
+
+hand:
+  name: "dexhand021_left"
+  side: "left"
+  mjcf_path: "../../../assets/mjcf/dexhand021_left/model.xml"

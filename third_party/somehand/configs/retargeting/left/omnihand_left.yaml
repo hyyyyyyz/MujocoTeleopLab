@@ -1,0 +1,6 @@
+extends: "../base/omnihand.yaml"
+
+hand:
+  name: "omnihand_left"
+  side: "left"
+  mjcf_path: "../../../assets/mjcf/omnihand_left/model.xml"

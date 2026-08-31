@@ -1,0 +1,233 @@
+"""MuJoCo simulation controller backend."""
+
+from __future__ import annotations
+
+import threading
+import time
+from pathlib import Path
+
+import mujoco
+import numpy as np
+
+from somehand.domain import HandCommand, HandState
+from somehand.infrastructure.hand_model import HandModel
+
+
+_MIN_ACTUATED_DOF_DAMPING = 0.75
+_MIN_MIMIC_DOF_DAMPING = 0.25
+_MIN_MIMIC_DOF_ARMATURE = 0.0
+_MIN_MIMIC_DOF_FRICTIONLOSS = 0.0
+_MAX_POSITION_ACTUATOR_KP = 5.0
+_MIMIC_EQUALITY_SOLREF = np.array([0.005, 1.5], dtype=np.float64)
+_MIMIC_EQUALITY_SOLIMP = np.array([0.95, 0.99, 0.0005, 0.5, 2.0], dtype=np.float64)
+_PASSIVE_TUNING_OVERRIDES = {
+    "linkerhand_l10": {
+        "mimic_damping": 0.35,
+        "mimic_armature": 0.01,
+        "mimic_frictionloss": 0.01,
+        "actuator_kp_cap": 4.0,
+    },
+    "linkerhand_l20pro": {
+        "mimic_damping": 0.35,
+        "mimic_armature": 0.01,
+        "mimic_frictionloss": 0.01,
+        "actuator_kp_cap": 4.0,
+    },
+    "linkerhand_l6": {
+        "mimic_damping": 0.35,
+        "mimic_armature": 0.01,
+        "mimic_frictionloss": 0.01,
+        "actuator_kp_cap": 4.0,
+    },
+    "linkerhand_o6": {
+        "mimic_damping": 0.35,
+        "mimic_armature": 0.01,
+        "mimic_frictionloss": 0.01,
+        "actuator_kp_cap": 4.0,
+    },
+    "linkerhand_o7": {
+        "mimic_damping": 0.35,
+        "mimic_armature": 0.01,
+        "mimic_frictionloss": 0.01,
+        "actuator_kp_cap": 4.0,
+    },
+    "revo2": {
+        "mimic_damping": 0.30,
+        "mimic_armature": 0.005,
+        "mimic_frictionloss": 0.005,
+        "actuator_kp_cap": 4.5,
+    },
+    "linkerhand_t12": {
+        "actuator_kp_cap": 4.0,
+    },
+}
+
+
+def _normalize_model_family_key(mjcf_path: str) -> str:
+    stem = Path(mjcf_path).resolve().parent.name
+    for suffix in ("_left", "_right"):
+        if stem.endswith(suffix):
+            return stem[: -len(suffix)]
+    return stem
+
+
+def _resolve_passive_tuning(mjcf_path: str) -> dict[str, float | np.ndarray]:
+    tuning = {
+        "actuated_damping": _MIN_ACTUATED_DOF_DAMPING,
+        "mimic_damping": _MIN_MIMIC_DOF_DAMPING,
+        "mimic_armature": _MIN_MIMIC_DOF_ARMATURE,
+        "mimic_frictionloss": _MIN_MIMIC_DOF_FRICTIONLOSS,
+        "actuator_kp_cap": _MAX_POSITION_ACTUATOR_KP,
+        "mimic_equality_solref": _MIMIC_EQUALITY_SOLREF,
+        "mimic_equality_solimp": _MIMIC_EQUALITY_SOLIMP,
+    }
+    tuning.update(_PASSIVE_TUNING_OVERRIDES.get(_normalize_model_family_key(mjcf_path), {}))
+    return tuning
+
+
+class MujocoSimController:
+    """Runs a fixed-rate MuJoCo simulation against target joint positions."""
+
+    def __init__(
+        self,
+        mjcf_path: str,
+        *,
+        control_rate_hz: int = 100,
+        sim_rate_hz: int = 500,
+    ):
+        self._hand_model = HandModel(mjcf_path)
+        self._passive_tuning = _resolve_passive_tuning(self._hand_model.mjcf_path)
+        self._actuator_qpos_indices = self._hand_model.get_actuator_qpos_indices()
+        self._actuator_dof_indices = self._get_actuator_dof_indices()
+        self._mimic_dof_indices = self._get_mimic_dof_indices()
+        self._ensure_minimum_damping()
+        self._soften_position_actuators()
+        self._stiffen_mimic_equalities()
+        self._control_rate_hz = int(control_rate_hz)
+        self._sim_rate_hz = int(sim_rate_hz)
+        self._control_interval_steps = max(int(round(self._sim_rate_hz / max(self._control_rate_hz, 1))), 1)
+        self._lock = threading.Lock()
+        self._target_qpos = self._hand_model.get_qpos()
+        self._cached_state = HandState(
+            measured_qpos_rad=self._hand_model.get_qpos(),
+            measured_qvel=np.zeros(self._hand_model.nv, dtype=np.float64),
+            applied_ctrl=np.zeros(self._hand_model.nu, dtype=np.float64),
+            sim_time=float(self._hand_model.data.time),
+            faults=None,
+            contacts=[],
+            backend="sim",
+        )
+        self._running = False
+        self._thread: threading.Thread | None = None
+
+    def _get_actuator_dof_indices(self) -> np.ndarray:
+        indices: list[int] = []
+        for actuator_id in range(self._hand_model.nu):
+            joint_id = int(self._hand_model.model.actuator_trnid[actuator_id][0])
+            indices.append(int(self._hand_model.model.jnt_dofadr[joint_id]))
+        return np.asarray(indices, dtype=np.int32)
+
+    def _get_mimic_dof_indices(self) -> np.ndarray:
+        indices = sorted({int(mimic["dof_id"]) for mimic in self._hand_model.mimic_joints})
+        return np.asarray(indices, dtype=np.int32)
+
+    def _ensure_minimum_damping(self) -> None:
+        damping = self._hand_model.model.dof_damping
+        if self._actuator_dof_indices.size > 0:
+            damping[self._actuator_dof_indices] = np.maximum(
+                damping[self._actuator_dof_indices],
+                float(self._passive_tuning["actuated_damping"]),
+            )
+        if self._mimic_dof_indices.size > 0:
+            damping[self._mimic_dof_indices] = np.maximum(
+                damping[self._mimic_dof_indices],
+                float(self._passive_tuning["mimic_damping"]),
+            )
+            armature = self._hand_model.model.dof_armature
+            armature[self._mimic_dof_indices] = np.maximum(
+                armature[self._mimic_dof_indices],
+                float(self._passive_tuning["mimic_armature"]),
+            )
+            frictionloss = self._hand_model.model.dof_frictionloss
+            frictionloss[self._mimic_dof_indices] = np.maximum(
+                frictionloss[self._mimic_dof_indices],
+                float(self._passive_tuning["mimic_frictionloss"]),
+            )
+
+    def _soften_position_actuators(self) -> None:
+        gainprm = self._hand_model.model.actuator_gainprm
+        biasprm = self._hand_model.model.actuator_biasprm
+        softened_kp = np.minimum(gainprm[:, 0], float(self._passive_tuning["actuator_kp_cap"]))
+        gainprm[:, 0] = softened_kp
+        biasprm[:, 1] = -softened_kp
+
+    def _stiffen_mimic_equalities(self) -> None:
+        model = self._hand_model.model
+        joint_eq_type = int(mujoco.mjtEq.mjEQ_JOINT)
+        equality_indices = [index for index in range(model.neq) if int(model.eq_type[index]) == joint_eq_type]
+        if not equality_indices:
+            return
+        model.eq_solref[equality_indices, :] = np.asarray(self._passive_tuning["mimic_equality_solref"], dtype=np.float64)
+        model.eq_solimp[equality_indices, :] = np.asarray(self._passive_tuning["mimic_equality_solimp"], dtype=np.float64)
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run_loop, name="somehand-sim-controller", daemon=True)
+        self._thread.start()
+
+    def set_command(self, command: HandCommand) -> None:
+        with self._lock:
+            self._target_qpos = np.asarray(command.target_qpos_rad, dtype=np.float64).copy()
+
+    def get_state(self) -> HandState:
+        with self._lock:
+            state = self._cached_state
+            return HandState(
+                measured_qpos_rad=None if state.measured_qpos_rad is None else state.measured_qpos_rad.copy(),
+                measured_qvel=None if state.measured_qvel is None else state.measured_qvel.copy(),
+                applied_ctrl=None if state.applied_ctrl is None else state.applied_ctrl.copy(),
+                sim_time=state.sim_time,
+                faults=None if state.faults is None else list(state.faults),
+                contacts=None if state.contacts is None else list(state.contacts),
+                backend=state.backend,
+            )
+
+    def close(self) -> None:
+        self._running = False
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+    def _run_loop(self) -> None:
+        step = 0
+        sleep_s = 1.0 / max(self._sim_rate_hz, 1)
+        while self._running:
+            tic = time.monotonic()
+            with self._lock:
+                target_qpos = self._target_qpos.copy()
+            if step % self._control_interval_steps == 0:
+                ctrl = target_qpos[self._actuator_qpos_indices].copy()
+                low = self._hand_model.model.actuator_ctrlrange[:, 0]
+                high = self._hand_model.model.actuator_ctrlrange[:, 1]
+                np.clip(ctrl, low, high, out=ctrl)
+                self._hand_model.data.ctrl[:] = ctrl
+            mujoco.mj_step(self._hand_model.model, self._hand_model.data)
+            with self._lock:
+                self._cached_state = HandState(
+                    measured_qpos_rad=self._hand_model.data.qpos.copy(),
+                    measured_qvel=self._hand_model.data.qvel.copy(),
+                    applied_ctrl=self._hand_model.data.ctrl.copy(),
+                    sim_time=float(self._hand_model.data.time),
+                    faults=None,
+                    contacts=[],
+                    backend="sim",
+                )
+            step += 1
+            elapsed = time.monotonic() - tic
+            if sleep_s > elapsed:
+                time.sleep(sleep_s - elapsed)

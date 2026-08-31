@@ -1,0 +1,55 @@
+defaults:
+  - sim2real
+  - _self_
+
+# This configuration is launched only by run_high_level_policy_sim2real.py.
+# It does not start PicoBridge, GMR, or the teleoperation reference worker.
+input:
+  provider: high_level_policy
+
+# Smooth an explicit return from POLICY to STANDING.
+standing_return_ramp_duration: 2.0
+
+camera:
+  source: realsense  # realsense | test-pattern
+  width: 640
+  height: 480
+  fps: 30
+  device: null
+
+high_level_policy:
+  enabled: true
+  endpoint: tcp://127.0.0.1:5555
+  task: demo
+  timeout_s: 1.0
+  reconnect_backoff_s: 1.0
+  replan_steps: 3  # Submit a fresh observation every three 30 Hz action frames.
+  jpeg_quality: 90
+  max_observation_age_s: 0.15
+  max_result_age_s: 0.1
+  entry_timeout_s: 5.0
+  hold_s: 3.0
+  safety:
+    root_height_min_m: 0.55
+    root_height_max_m: 1.05
+    max_root_xy_speed_m_s: 2.5
+    max_root_displacement_m: 0.1
+    max_yaw_rate_rad_s: 2.5
+    max_joint_rate_rad_s: 10.0
+    max_joint_projection_rad: 0.1
+    neck_yaw_min_deg: -45.0
+    neck_yaw_max_deg: 45.0
+    neck_pitch_min_deg: -40.0
+    neck_pitch_max_deg: 40.0
+
+recording:
+  enabled: false
+
+hands:
+  enabled: true
+  driver: linkerhand_o6
+  sides: [left, right]
+
+neck:
+  enabled: true
+  driver: openneck

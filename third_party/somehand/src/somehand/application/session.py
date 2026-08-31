@@ -1,0 +1,191 @@
+"""Session-level orchestration for sources, engine, preview, and sinks."""
+
+from __future__ import annotations
+
+import signal
+import time
+from threading import Event, Thread
+from collections.abc import Sequence
+from typing import Callable
+
+from somehand.domain import HandFrameSink, HandTrackingSource, OutputSink, PreviewWindow, SessionSummary
+
+from .engine import RetargetingEngine
+
+
+class RetargetingSession:
+    """Runs the main input -> engine -> sink loop."""
+
+    def __init__(
+        self,
+        engine: RetargetingEngine,
+        *,
+        sinks: Sequence[OutputSink] = (),
+        frame_sinks: Sequence[HandFrameSink] = (),
+        preview_window: PreviewWindow | None = None,
+    ):
+        self.engine = engine
+        self.sinks = list(sinks)
+        self.frame_sinks = list(frame_sinks)
+        self.preview_window = preview_window
+
+    @property
+    def is_running(self) -> bool:
+        return all(sink.is_running for sink in [*self.sinks, *self.frame_sinks])
+
+    def run(
+        self,
+        source: HandTrackingSource,
+        *,
+        input_type: str,
+        realtime: bool = False,
+        loop: bool = False,
+        stats_every: int = 0,
+        stop_condition: Callable[[], bool] | None = None,
+    ) -> SessionSummary:
+        frame_count = 0
+        detected_count = 0
+        frame_period = 1.0 / max(source.fps, 1)
+        frame_sink_stop = Event()
+        frame_sink_thread = self._start_frame_sink_thread(source, stop_event=frame_sink_stop)
+
+        try:
+            while True:
+                if stop_condition is not None and stop_condition():
+                    break
+
+                if not source.is_available():
+                    if loop and source.reset():
+                        continue
+                    break
+
+                tic = time.monotonic()
+                try:
+                    frame = source.get_frame()
+                except StopIteration:
+                    break
+
+                frame_count += 1
+
+                if frame.detection is not None:
+                    if frame_sink_thread is None:
+                        for sink in self.frame_sinks:
+                            sink.on_frame(frame.detection)
+                    detected_count += 1
+                    result = self.engine.process(frame.detection)
+                    for sink in self.sinks:
+                        sink.on_result(result)
+
+                if self.preview_window is not None and not self.preview_window.show(source, frame):
+                    break
+
+                if stats_every > 0 and frame_count % stats_every == 0:
+                    stats = source.stats_snapshot()
+                    if stats:
+                        print(
+                            "UDP stats:"
+                            f" recv={stats.get('packets_received', 0)}"
+                            f" valid={stats.get('packets_valid', 0)}"
+                            f" bad_size={stats.get('packets_bad_size', 0)}"
+                            f" bad_decode={stats.get('packets_bad_decode', 0)}"
+                            f" floats={stats.get('last_float_count', 0)}/{stats.get('expected_float_count', 0)}"
+                            f" bytes={stats.get('last_packet_bytes', 0)}"
+                            f" sender={stats.get('last_sender')}"
+                        )
+
+                if stop_condition is not None and stop_condition():
+                    break
+
+                if not self.is_running:
+                    break
+
+                if realtime:
+                    elapsed = time.monotonic() - tic
+                    sleep_s = frame_period - elapsed
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
+        except KeyboardInterrupt:
+            print("\nStopped.")
+        finally:
+            previous_sigint_handler = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            frame_sink_stop.set()
+            if frame_sink_thread is not None:
+                frame_sink_thread.join(timeout=1.0)
+            _close_resource(source)
+            if self.preview_window is not None:
+                _close_resource(self.preview_window)
+            for sink in reversed(self.frame_sinks):
+                _close_resource(sink)
+            for sink in reversed(self.sinks):
+                _close_resource(sink)
+            signal.signal(signal.SIGINT, previous_sigint_handler)
+
+        return SessionSummary(
+            num_frames=frame_count,
+            num_detected=detected_count,
+            source_desc=source.source_desc,
+            input_type=input_type,
+        )
+
+    def _start_frame_sink_thread(
+        self,
+        source: HandTrackingSource,
+        *,
+        stop_event: Event,
+    ) -> Thread | None:
+        return _start_frame_sink_thread(
+            source,
+            self.frame_sinks,
+            lambda: self.is_running,
+            stop_event=stop_event,
+            snapshot_attr_name="latest_hand_frame_snapshot",
+            thread_name="somehand-frame-sink",
+        )
+
+
+def _start_frame_sink_thread(
+    source: object,
+    frame_sinks: list,
+    is_running_fn: Callable[[], bool],
+    *,
+    stop_event: Event,
+    snapshot_attr_name: str,
+    thread_name: str,
+) -> Thread | None:
+    if not frame_sinks:
+        return None
+
+    snapshot_fn = getattr(source, snapshot_attr_name, None)
+    if not callable(snapshot_fn):
+        return None
+
+    def _worker() -> None:
+        last_frame_index = -1
+        sleep_s = 1.0 / max(source.fps, 1)  # type: ignore[union-attr]
+        while not stop_event.is_set():
+            snapshot = snapshot_fn()
+            if snapshot is not None:
+                frame_index, frame = snapshot
+                if frame_index != last_frame_index:
+                    last_frame_index = frame_index
+                    for sink in frame_sinks:
+                        if sink.is_running:
+                            sink.on_frame(frame)
+            if not is_running_fn():
+                break
+            time.sleep(sleep_s)
+
+    thread = Thread(target=_worker, name=thread_name, daemon=True)
+    thread.start()
+    return thread
+
+
+def _close_resource(resource: object) -> None:
+    close_fn = getattr(resource, "close", None)
+    if not callable(close_fn):
+        return
+    try:
+        close_fn()
+    except BaseException as exc:
+        print(f"Warning: failed to close {type(resource).__name__}: {exc}")

@@ -1,0 +1,8 @@
+# Local workstation preset for Pico 4 -> simulated G1 (MuJoCo).
+# This profile does not open a DDS connection or issue any real-robot command.
+defaults:
+  - /pico4_sim
+  - _self_
+
+# Start with the physics view only; use `viewers=all` when debugging retargeting.
+viewers: sim2sim

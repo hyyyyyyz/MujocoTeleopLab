@@ -1,0 +1,106 @@
+"""Shared fixtures for Teleopit test suite."""
+import os
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from teleopit.interfaces import RobotState
+
+
+# ── Skip markers ────────────────────────────────────────────────
+
+def _has_module(name: str) -> bool:
+    try:
+        __import__(name)
+        return True
+    except ImportError:
+        return False
+
+
+requires_mujoco = pytest.mark.skipif(
+    not _has_module("mujoco"), reason="mujoco not installed"
+)
+requires_onnxruntime = pytest.mark.skipif(
+    not _has_module("onnxruntime"), reason="onnxruntime not installed"
+)
+requires_h5py = pytest.mark.skipif(
+    not _has_module("h5py"), reason="h5py not installed"
+)
+requires_mink = pytest.mark.skipif(
+    not _has_module("mink"), reason="mink not installed"
+)
+
+
+# ── Paths ───────────────────────────────────────────────────────
+
+@pytest.fixture
+def config_path():
+    """Return path to config directory."""
+    return os.path.join(os.path.dirname(__file__), "..", "teleopit", "configs")
+
+
+@pytest.fixture
+def project_root():
+    """Return project root directory."""
+    return Path(__file__).parent.parent
+
+
+def find_g1_xml_path() -> str | None:
+    """Return the preferred test XML path for G1 MuJoCo-based tests."""
+    root = Path(__file__).parent.parent
+    candidates = [
+        root / "assets" / "robots" / "unitree_g1" / "g1_29dof.xml",
+    ]
+    for path in candidates:
+        if path.exists():
+            return str(path)
+    return None
+
+
+# ── Robot config values (from g1.yaml) ──────────────────────────
+
+NUM_ACTIONS = 29
+
+DEFAULT_ANGLES = np.array([
+    -0.2, 0.0, 0.0, 0.4, -0.2, 0.0,
+    -0.2, 0.0, 0.0, 0.4, -0.2, 0.0,
+    0, 0, 0,
+    0, 0.4, 0, 1.2, 0.0, 0.0, 0.0,
+    0, -0.4, 0, 1.2, 0.0, 0.0, 0.0,
+], dtype=np.float32)
+
+
+
+@pytest.fixture
+def num_actions():
+    return NUM_ACTIONS
+
+
+@pytest.fixture
+def default_angles():
+    return DEFAULT_ANGLES.copy()
+
+
+# ── Fake RobotState ────────────────────────────────────────────
+
+@pytest.fixture
+def fake_robot_state():
+    """Create a plausible RobotState for testing."""
+    return RobotState(
+        qpos=np.zeros(NUM_ACTIONS, dtype=np.float32),
+        qvel=np.zeros(NUM_ACTIONS, dtype=np.float32),
+        quat=np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        ang_vel=np.zeros(3, dtype=np.float32),
+        timestamp=0.0,
+    )
+
+
+# ── Temp directory ──────────────────────────────────────────────
+
+@pytest.fixture
+def tmp_dir():
+    """Provide a temporary directory that is cleaned up after test."""
+    with tempfile.TemporaryDirectory() as d:
+        yield Path(d)

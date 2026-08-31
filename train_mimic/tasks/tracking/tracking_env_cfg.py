@@ -1,0 +1,340 @@
+"""Base motion tracking task configuration.
+
+Copied from mjlab 1.4.0 ``mjlab.tasks.tracking.tracking_env_cfg`` for local
+customisation.  All observation / reward / termination / event terms still
+reference ``mjlab.tasks.tracking.mdp`` — only the *wiring* lives here.
+"""
+
+from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs.mdp import dr
+from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.action_manager import ActionTermCfg
+from mjlab.managers.command_manager import CommandTermCfg
+from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.managers.termination_manager import TerminationTermCfg
+from mjlab.scene import SceneCfg
+from mjlab.sim import MujocoCfg, SimulationCfg
+from mjlab.terrains import TerrainEntityCfg
+from mjlab.utils.noise import UniformNoiseCfg as Unoise
+from mjlab.viewer import ViewerConfig
+
+from train_mimic.tasks.tracking import mdp
+from train_mimic.tasks.tracking.mdp import MotionCommandCfg
+
+VELOCITY_RANGE = {
+    "x": (-0.5, 0.5),
+    "y": (-0.5, 0.5),
+    "z": (-0.2, 0.2),
+    "roll": (-0.52, 0.52),
+    "pitch": (-0.52, 0.52),
+    "yaw": (-0.78, 0.78),
+}
+
+
+def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
+    """Create base tracking task configuration."""
+
+    ##
+    # Observations
+    ##
+
+    actor_terms = {
+        "ref_joint_pos": ObservationTermCfg(
+            func=mdp.ref_joint_pos, params={"command_name": "motion"}
+        ),
+        "ref_joint_vel": ObservationTermCfg(
+            func=mdp.ref_joint_vel, params={"command_name": "motion"}
+        ),
+        "ref_anchor_pos_b": ObservationTermCfg(
+            func=mdp.ref_anchor_pos_b,
+            params={"command_name": "motion"},
+            noise=Unoise(n_min=-0.25, n_max=0.25),
+        ),
+        "ref_anchor_ori_b": ObservationTermCfg(
+            func=mdp.ref_anchor_ori_b,
+            params={"command_name": "motion"},
+            noise=Unoise(n_min=-0.05, n_max=0.05),
+        ),
+        "robot_base_lin_vel_b": ObservationTermCfg(
+            func=mdp.builtin_sensor,
+            params={"sensor_name": "robot/imu_lin_vel"},
+            noise=Unoise(n_min=-0.5, n_max=0.5),
+        ),
+        "robot_base_ang_vel_b": ObservationTermCfg(
+            func=mdp.builtin_sensor,
+            params={"sensor_name": "robot/imu_ang_vel"},
+            noise=Unoise(n_min=-0.2, n_max=0.2),
+        ),
+        "robot_joint_pos_rel": ObservationTermCfg(
+            func=mdp.joint_pos_rel,
+            noise=Unoise(n_min=-0.01, n_max=0.01),
+            params={"biased": True},
+        ),
+        "robot_joint_vel": ObservationTermCfg(
+            func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5)
+        ),
+        "prev_action": ObservationTermCfg(func=mdp.last_action),
+    }
+
+    critic_terms = {
+        "ref_joint_pos": ObservationTermCfg(
+            func=mdp.ref_joint_pos, params={"command_name": "motion"}
+        ),
+        "ref_joint_vel": ObservationTermCfg(
+            func=mdp.ref_joint_vel, params={"command_name": "motion"}
+        ),
+        "ref_anchor_pos_b": ObservationTermCfg(
+            func=mdp.ref_anchor_pos_b, params={"command_name": "motion"}
+        ),
+        "ref_anchor_ori_b": ObservationTermCfg(
+            func=mdp.ref_anchor_ori_b, params={"command_name": "motion"}
+        ),
+        "robot_tracking_body_pos_b": ObservationTermCfg(
+            func=mdp.robot_tracking_body_pos_b, params={"command_name": "motion"}
+        ),
+        "robot_tracking_body_ori_b": ObservationTermCfg(
+            func=mdp.robot_tracking_body_ori_b, params={"command_name": "motion"}
+        ),
+        "robot_base_lin_vel_b": ObservationTermCfg(
+            func=mdp.builtin_sensor, params={"sensor_name": "robot/imu_lin_vel"}
+        ),
+        "robot_base_ang_vel_b": ObservationTermCfg(
+            func=mdp.builtin_sensor, params={"sensor_name": "robot/imu_ang_vel"}
+        ),
+        "robot_joint_pos_rel": ObservationTermCfg(func=mdp.joint_pos_rel),
+        "robot_joint_vel": ObservationTermCfg(func=mdp.joint_vel_rel),
+        "prev_action": ObservationTermCfg(func=mdp.last_action),
+    }
+
+    observations = {
+        "actor": ObservationGroupCfg(
+            terms=actor_terms,
+            concatenate_terms=True,
+            enable_corruption=True,
+        ),
+        "critic": ObservationGroupCfg(
+            terms=critic_terms,
+            concatenate_terms=True,
+            enable_corruption=False,
+        ),
+    }
+
+    ##
+    # Actions
+    ##
+
+    actions: dict[str, ActionTermCfg] = {
+        "joint_pos": JointPositionActionCfg(
+            entity_name="robot",
+            actuator_names=(".*",),
+            scale=0.5,
+            use_default_offset=True,
+        )
+    }
+
+    ##
+    # Commands
+    ##
+
+    commands: dict[str, CommandTermCfg] = {
+        "motion": MotionCommandCfg(
+            entity_name="robot",
+            resampling_time_range=(1.0e9, 1.0e9),
+            debug_vis=True,
+            pose_range={
+                "x": (-0.05, 0.05),
+                "y": (-0.05, 0.05),
+                "z": (-0.01, 0.01),
+                "roll": (-0.1, 0.1),
+                "pitch": (-0.1, 0.1),
+                "yaw": (-0.2, 0.2),
+            },
+            velocity_range=VELOCITY_RANGE,
+            joint_position_range=(-0.1, 0.1),
+            # Override in robot cfg.
+            motion_file="",
+            anchor_body_name="",
+            body_names=(),
+        )
+    }
+
+    ##
+    # Events (domain randomisation)
+    ##
+
+    events: dict[str, EventTermCfg] = {
+        "push_robot": EventTermCfg(
+            func=mdp.push_by_setting_velocity,
+            mode="interval",
+            interval_range_s=(4.0, 6.0),
+            params={"velocity_range": VELOCITY_RANGE},
+        ),
+        "base_com": EventTermCfg(
+            mode="startup",
+            func=dr.body_com_offset,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set in robot cfg.
+                "operation": "add",
+                "ranges": {
+                    0: (-0.025, 0.025),
+                    1: (-0.05, 0.05),
+                    2: (-0.05, 0.05),
+                },
+            },
+        ),
+        "add_joint_default_pos": EventTermCfg(
+            mode="startup",
+            func=dr.joint_default_pos,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+                "operation": "add",
+                "ranges": (-0.01, 0.01),
+            },
+        ),
+        "physics_material": EventTermCfg(
+            mode="startup",
+            func=dr.geom_friction,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", geom_names=()),  # Set per-robot.
+                "operation": "abs",
+                "ranges": (0.3, 1.6),
+            },
+        ),
+        "randomize_rigid_body_mass": EventTermCfg(
+            mode="startup",
+            func=dr.pseudo_inertia,
+            params={
+                "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
+                "alpha_range": (-0.1, 0.45),
+            },
+        ),
+    }
+
+    ##
+    # Rewards
+    ##
+
+    rewards: dict[str, RewardTermCfg] = {
+        "motion_global_root_pos": RewardTermCfg(
+            func=mdp.motion_global_anchor_position_error_exp,
+            weight=0.5,
+            params={"command_name": "motion", "std": 0.3},
+        ),
+        "motion_global_root_ori": RewardTermCfg(
+            func=mdp.motion_global_anchor_orientation_error_exp,
+            weight=0.5,
+            params={"command_name": "motion", "std": 0.4},
+        ),
+        "motion_global_root_lin_vel": RewardTermCfg(
+            func=mdp.motion_global_anchor_linear_velocity_error_exp,
+            weight=1.0,
+            params={"command_name": "motion", "std": 1.0},
+        ),
+        "motion_global_root_ang_vel": RewardTermCfg(
+            func=mdp.motion_global_anchor_angular_velocity_error_exp,
+            weight=1.0,
+            params={"command_name": "motion", "std": 3.0},
+        ),
+        "motion_body_pos": RewardTermCfg(
+            func=mdp.motion_relative_body_position_error_exp,
+            weight=1.0,
+            params={"command_name": "motion", "std": 0.3},
+        ),
+        "motion_body_ori": RewardTermCfg(
+            func=mdp.motion_relative_body_orientation_error_exp,
+            weight=1.0,
+            params={"command_name": "motion", "std": 0.4},
+        ),
+        "motion_body_lin_vel": RewardTermCfg(
+            func=mdp.motion_global_body_linear_velocity_error_exp,
+            weight=1.0,
+            params={"command_name": "motion", "std": 1.0},
+        ),
+        "motion_body_ang_vel": RewardTermCfg(
+            func=mdp.motion_global_body_angular_velocity_error_exp,
+            weight=1.0,
+            params={"command_name": "motion", "std": 3.14},
+        ),
+        "motion_joint_pos": RewardTermCfg(
+            func=mdp.motion_joint_position_error_exp,
+            weight=1.0,
+            params={"command_name": "motion", "std": 0.5},
+        ),
+        "motion_joint_vel": RewardTermCfg(
+            func=mdp.motion_joint_velocity_error_exp,
+            weight=0.5,
+            params={"command_name": "motion", "std": 3.0},
+        ),
+        "survival": RewardTermCfg(func=mdp.survival, weight=3.0),
+        "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.5),
+        "joint_limit": RewardTermCfg(
+            func=mdp.joint_pos_limits,
+            weight=-10.0,
+            params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+        ),
+    }
+
+    ##
+    # Terminations
+    ##
+
+    terminations: dict[str, TerminationTermCfg] = {
+        "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
+        "anchor_pos": TerminationTermCfg(
+            func=mdp.bad_anchor_pos_z_only,
+            params={"command_name": "motion", "threshold": 0.25},
+        ),
+        "anchor_ori": TerminationTermCfg(
+            func=mdp.bad_anchor_ori,
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "command_name": "motion",
+                "threshold": 0.8,
+            },
+        ),
+        "ee_body_pos": TerminationTermCfg(
+            func=mdp.bad_motion_body_pos_z_only,
+            params={
+                "command_name": "motion",
+                "threshold": 0.25,
+                "body_names": (),  # Set per-robot.
+            },
+        ),
+    }
+
+    ##
+    # Assemble and return
+    ##
+
+    return ManagerBasedRlEnvCfg(
+        scene=SceneCfg(terrain=TerrainEntityCfg(terrain_type="plane"), num_envs=1),
+        observations=observations,
+        actions=actions,
+        commands=commands,
+        events=events,
+        rewards=rewards,
+        terminations=terminations,
+        viewer=ViewerConfig(
+            origin_type=ViewerConfig.OriginType.ASSET_BODY,
+            entity_name="robot",
+            body_name="",  # Set per-robot.
+            distance=2.8,
+            fovy=55.0,
+            elevation=-5.0,
+            azimuth=120.0,
+        ),
+        sim=SimulationCfg(
+            nconmax=500,
+            njmax=250,
+            mujoco=MujocoCfg(
+                timestep=0.005,
+                iterations=10,
+                ls_iterations=20,
+            ),
+        ),
+        decimation=4,
+        episode_length_s=10.0,
+    )

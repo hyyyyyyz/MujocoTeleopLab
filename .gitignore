@@ -1,0 +1,112 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+.venv-*/
+env/
+!train_mimic/rsl_rl/env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project-specific
+.sisyphus/
+*.h5
+*.onnx
+track.pt
+track_*.pt
+assets/demo.gif
+assets/demo.mp4
+/data/
+!scripts/data/
+!scripts/data/*.py
+!train_mimic/data/
+!train_mimic/data/*.py
+outputs/
+benchmark_results/
+logs/
+ckpt/
+ckpt_restore/
+wandb/
+*.log
+# Training - downloaded reference assets (re-downloadable)
+train_mimic/assets/g1/usd/configuration/
+train_mimic/assets/g1/usd/meshes/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hydra runtime output
+.hydra/
+.hydra/
+
+# GMR retargeting assets (downloaded from ModelScope)
+teleopit/retargeting/gmr/assets/
+
+# Canonical robot XML/meshes (downloaded from ModelScope)
+assets/robots/
+
+# Legacy training-side robot assets are no longer tracked.
+train_mimic/assets/
+
+# ModelScope download cache
+data/modelscope_cache/
+data/modelscope_upload/
+
+# Codex local workspace state
+.codex
+.omx/
+
+# Machine-local tools and compilers used to run or rebuild the project.
+.toolchain/
+.tools/
