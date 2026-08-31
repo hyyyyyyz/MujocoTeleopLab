@@ -172,15 +172,16 @@ def _prepare_input_cfg(input_cfg: Any, project_root: Path, *, sim2real: bool) ->
         )
     elif provider_kind == "udp_bvh":
         pass  # skeleton resolved automatically from bvh_format
-    elif provider_kind != "pico4":
+    elif provider_kind not in ("pico4", "xrobotoolkit"):
         raise ValueError(
             f"Unsupported input.provider='{provider_kind}'. "
-            "Supported providers are bvh, pico4, udp_bvh."
+            "Supported providers are bvh, pico4, xrobotoolkit, udp_bvh."
         )
 
     if sim2real and provider_kind not in ("bvh", "pico4", "udp_bvh"):
         raise ValueError(
-            f"Sim2real only supports bvh, pico4, or udp_bvh input providers; got '{provider_kind}'."
+            f"Sim2real only supports bvh, pico4, or udp_bvh input providers; got '{provider_kind}'. "
+            "XRoboToolkit is currently integrated for MuJoCo simulation only."
         )
     return provider_kind
 
@@ -192,6 +193,7 @@ def _build_input_provider(
     provider_kind: str,
     bvh_input_cls: type[Any],
     pico4_input_cls: type[Any],
+    xrobotoolkit_input_cls: type[Any],
 ) -> Any:
     if provider_kind == "udp_bvh":
         from teleopit.inputs.udp_bvh_provider import UDPBVHInputProvider
@@ -224,6 +226,21 @@ def _build_input_provider(
             bridge_history_size=int(cfg_get(input_cfg, "bridge_history_size", 120)),
         )
 
+    if provider_kind == "xrobotoolkit":
+        return xrobotoolkit_input_cls(
+            human_format=str(cfg_get(input_cfg, "human_format", "pico_bridge")),
+            timeout=float(cfg_get(input_cfg, "pico4_timeout", 60.0)),
+            buffer_size=int(cfg_get(input_cfg, "pico4_buffer_size", 60)),
+            timestamp_gap_reset_s=float(cfg_get(input_cfg, "pico4_timestamp_gap_reset_s", 0.15)),
+            pause_button=cfg_get(input_cfg, "pause_button", "A"),
+            pause_debounce_s=float(cfg_get(input_cfg, "pause_debounce_s", 0.25)),
+            arms_button=cfg_get(input_cfg, "arms_button", "B"),
+            arms_debounce_s=float(cfg_get(input_cfg, "arms_debounce_s", 0.25)),
+            poll_hz=float(cfg_get(input_cfg, "xrobotoolkit_poll_hz", 120.0)),
+            close_sdk=bool(cfg_get(input_cfg, "xrobotoolkit_close_sdk", True)),
+            sdk_shutdown_settle_s=float(cfg_get(input_cfg, "xrobotoolkit_shutdown_settle_s", 1.0)),
+        )
+
     return bvh_input_cls(
         bvh_path=str(cfg_get(input_cfg, "bvh_file")),
         human_format=str(cfg_get(input_cfg, "bvh_format", "lafan1")),
@@ -235,7 +252,7 @@ def _resolve_human_format(input_cfg: Any, input_provider: Any) -> str:
     if hasattr(input_provider, "human_format"):
         provider_format = input_provider.human_format
         provider_kind = str(cfg_get(input_cfg, "provider", "bvh")).lower()
-        if provider_kind == "pico4":
+        if provider_kind in ("pico4", "xrobotoolkit"):
             return str(provider_format)
         return f"bvh_{provider_format}"
 
@@ -243,7 +260,7 @@ def _resolve_human_format(input_cfg: Any, input_provider: Any) -> str:
     if human_format and str(human_format) != "null":
         return str(human_format)
 
-    if str(cfg_get(input_cfg, "provider", "bvh")).lower() == "pico4":
+    if str(cfg_get(input_cfg, "provider", "bvh")).lower() in ("pico4", "xrobotoolkit"):
         return str(cfg_get(input_cfg, "human_format", "pico_bridge"))
     return f"bvh_{cfg_get(input_cfg, 'bvh_format', 'lafan1')}"
 
@@ -283,6 +300,7 @@ def build_inference_components(
     obs_builder_cls: type[Any],
     bvh_input_cls: type[Any],
     pico4_input_cls: type[Any],
+    xrobotoolkit_input_cls: type[Any],
     retargeter_cls: type[Any],
 ) -> InferenceComponents:
     del obs_builder_cls
@@ -305,6 +323,7 @@ def build_inference_components(
         provider_kind=provider_kind,
         bvh_input_cls=bvh_input_cls,
         pico4_input_cls=pico4_input_cls,
+        xrobotoolkit_input_cls=xrobotoolkit_input_cls,
     )
     retargeter = _build_retargeter(input_cfg, input_provider, retargeter_cls)
     return InferenceComponents(
@@ -327,6 +346,7 @@ def build_sim2real_mocap_components(
     obs_builder_cls: type[Any],
     bvh_input_cls: type[Any],
     pico4_input_cls: type[Any],
+    xrobotoolkit_input_cls: type[Any],
     retargeter_cls: type[Any],
 ) -> MocapComponents:
     del obs_builder_cls
@@ -348,6 +368,7 @@ def build_sim2real_mocap_components(
         provider_kind=provider_kind,
         bvh_input_cls=bvh_input_cls,
         pico4_input_cls=pico4_input_cls,
+        xrobotoolkit_input_cls=xrobotoolkit_input_cls,
     )
     retargeter = _build_retargeter(input_cfg, input_provider, retargeter_cls)
     return MocapComponents(

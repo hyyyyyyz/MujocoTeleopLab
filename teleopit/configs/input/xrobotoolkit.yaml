@@ -1,0 +1,24 @@
+# Local XRoboToolkit PC Service input.  The body skeleton matches pico_bridge,
+# so it reuses the existing pico_bridge_to_g1 retargeting configuration.
+provider: xrobotoolkit
+human_format: pico_bridge
+robot_name: unitree_g1
+human_height: 1.75
+pico4_timeout: 60.0
+pico4_buffer_size: 60
+pico4_timestamp_gap_reset_s: 0.15
+pause_button: A
+pause_debounce_s: 0.25
+arms_button: B
+arms_debounce_s: 0.25
+xrobotoolkit_poll_hz: 120.0
+xrobotoolkit_close_sdk: true
+# Avoids the SDK v1.0.2 feedback-stream startup/shutdown race.
+xrobotoolkit_shutdown_settle_s: 1.0
+video:
+  enabled: false
+  source: null
+  width: 1280
+  height: 720
+  fps: 30
+  device: null

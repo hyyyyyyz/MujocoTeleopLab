@@ -17,12 +17,12 @@ def _sim_status(cfg: DictConfig) -> tuple[tuple[str, str], ...]:
     input_cfg = cfg_get(cfg, "input", {}) or {}
     provider = str(cfg_get(input_cfg, "provider", "bvh")).lower()
     viewers = str(cfg_get(cfg, "viewers", "none"))
-    if provider == "pico4":
+    if provider in ("pico4", "xrobotoolkit"):
         keyboard_cfg = cfg_get(cfg, "keyboard", {}) or {}
         state = "STANDING" if bool(cfg_get(keyboard_cfg, "enabled", False)) else "MOCAP"
         return (
             ("State", state),
-            ("Input", "Pico4 live"),
+            ("Input", "XRoboToolkit live" if provider == "xrobotoolkit" else "Pico4 live"),
             ("Viewers", viewers),
         )
     return (
@@ -41,8 +41,8 @@ def main(cfg: DictConfig) -> None:
     num_steps = int(cfg.get("num_steps", 0))
     events = []
     input_cfg = cfg_get(cfg, "input", {}) or {}
-    if cfg_get(input_cfg, "provider", None) == "pico4":
-        events.append("waiting for Pico4 body tracking data")
+    if cfg_get(input_cfg, "provider", None) in ("pico4", "xrobotoolkit"):
+        events.append("waiting for live Pico body tracking data")
     console.start(status=_sim_status(cfg), controls=sim_keyboard_controls(cfg), events=events)
     result = pipeline.run(num_steps=num_steps)
     console.event(str(result))

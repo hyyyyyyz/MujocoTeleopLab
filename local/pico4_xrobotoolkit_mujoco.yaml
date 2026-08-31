@@ -1,0 +1,5 @@
+defaults:
+  - /xrobotoolkit_sim
+  - _self_
+
+viewers: sim2sim

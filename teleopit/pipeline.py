@@ -8,7 +8,7 @@ from omegaconf import DictConfig
 from teleopit.bus.in_process import InProcessBus
 from teleopit.controllers.observation import VelCmdObservationBuilder
 from teleopit.controllers.rl_policy import RLPolicyController
-from teleopit.inputs import BVHInputProvider, Pico4InputProvider
+from teleopit.inputs import BVHInputProvider, Pico4InputProvider, XRoboToolkitInputProvider
 from teleopit.inputs.pico_video import PicoVideoRuntime, parse_pico_video_config
 from teleopit.retargeting.core import RetargetingModule
 from teleopit.robots.mujoco_robot import MuJoCoRobot
@@ -30,6 +30,7 @@ class TeleopPipeline:
             obs_builder_cls=VelCmdObservationBuilder,
             bvh_input_cls=BVHInputProvider,
             pico4_input_cls=Pico4InputProvider,
+            xrobotoolkit_input_cls=XRoboToolkitInputProvider,
             retargeter_cls=RetargetingModule,
         )
 
@@ -61,4 +62,9 @@ class TeleopPipeline:
             raise ValueError("num_steps must be non-negative (0 = infinite)")
 
         self.controller.reset()
-        return dict(self.loop.run(cast(Any, self.input_provider), cast(Any, self.retargeter), num_steps=num_steps))
+        try:
+            return dict(self.loop.run(cast(Any, self.input_provider), cast(Any, self.retargeter), num_steps=num_steps))
+        finally:
+            close = getattr(self.input_provider, "close", None)
+            if callable(close):
+                close()
