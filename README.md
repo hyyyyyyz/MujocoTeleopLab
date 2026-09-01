@@ -62,6 +62,23 @@ python scripts/run/run_sim.py \
 For sim2real, viewers are disabled by default. Add `viewers=retarget` to show
 the retargeted reference in an optional MuJoCo window.
 
+For Pico-to-MuJoCo teleoperation through XRoboToolkit, including simulated
+first-person Remote Vision and SIMPLE-style controller activation, see the
+[XRoboToolkit MuJoCo tutorial](docs/docs/tutorials/xrobotoolkit-sim2sim.md).
+
+For MuJoCo table-top manipulation with a 43-DOF G1/Dex3 model, collidable
+objects, SIMPLE-style joystick walking, trigger hand gestures, and Pico Remote
+Vision with HMD camera control, use the separate scene runtime:
+
+```bash
+bash scripts/setup/setup_scene_teleop.sh
+PICO_VIDEO_HOST=<Pico IPv4> bash scripts/run/start_scene_teleop.sh --scene cube
+```
+
+This path is intentionally separate from the 29-DOF whole-body tracker. See
+the [XRoboToolkit scene teleoperation tutorial](docs/docs/tutorials/scene-teleop.md)
+for setup, controller mapping, and custom-scene requirements.
+
 ## Documentation
 
 Full docs at **[BotRunner64.github.io/Teleopit](https://BotRunner64.github.io/Teleopit/)**, covering installation profiles, all tutorials, configuration reference, and architecture.

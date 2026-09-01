@@ -22,12 +22,14 @@ If this is your first time using Teleopit:
 
 1. [Install Teleopit](getting-started/installation) for the job you want to do
    and complete the check at the end of that page.
-2. Continue with one of the four guides below.
+2. Continue with one of the seven guides below.
 
 | I want to... | Follow this guide |
 |--------------|-------------------|
 | Check a motion controller in MuJoCo | [Run a Motion Controller in Simulation](tutorials/offline-sim2sim) |
 | Try Pico VR control without a real robot | [VR Teleoperation in Simulation](tutorials/pico-sim2sim) |
+| Use XRoboToolkit Pico tracking with the standard G1 sim2sim controller | [XRoboToolkit Pico Teleoperation in MuJoCo](tutorials/xrobotoolkit-sim2sim) |
+| Manipulate table-top objects with Pico, Dex3, and the scene WBC in MuJoCo | [XRoboToolkit Table-top Scene Teleoperation](tutorials/scene-teleop) |
 | Control a physical G1 with Pico VR | [VR Teleoperation on Unitree G1](tutorials/pico-sim2real) |
 | Train and export my own controller | [Train a Motion Controller](tutorials/training) |
 

@@ -44,6 +44,7 @@ coverage.xml
 .env
 .venv
 .venv-*/
+.venv_scene/
 env/
 !train_mimic/rsl_rl/env/
 venv/
@@ -78,6 +79,8 @@ ckpt/
 ckpt_restore/
 wandb/
 *.log
+# MuJoCo may emit this uppercase diagnostic file when a model/resource warning occurs.
+MUJOCO_LOG.TXT
 # Training - downloaded reference assets (re-downloadable)
 train_mimic/assets/g1/usd/configuration/
 train_mimic/assets/g1/usd/meshes/
@@ -110,3 +113,4 @@ data/modelscope_upload/
 # Machine-local tools and compilers used to run or rebuild the project.
 .toolchain/
 .tools/
+third_party/decoupled_wbc/

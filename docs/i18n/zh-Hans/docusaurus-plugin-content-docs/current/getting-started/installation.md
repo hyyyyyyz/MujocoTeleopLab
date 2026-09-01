@@ -55,6 +55,7 @@ Conda 负责创建环境；进入环境后，仍使用 `pip install` 安装 Tele
 |------|----------|------------|
 | 在 MuJoCo 中运行运控 | `pip install -e .` | 基础推理、GMR、MuJoCo 和 ONNX Runtime |
 | 在仿真或 G1 上使用 Pico | `pip install -e '.[pico4]'` | Pico 接收与真机运行环境 |
+| 在 MuJoCo 中运行 XRoboToolkit 桌面场景 | `bash scripts/setup/setup_scene_teleop.sh` | 独立的 Python 3.10 解耦 WBC、Pinocchio、Dex3 IK 与场景依赖（先运行 `setup_xrobotoolkit.sh`） |
 | 不使用 Pico，在真实 G1 上回放 BVH | `pip install -e '.[sim2real]'` | G1 运行环境和 OpenCV |
 | 训练运控策略 | `pip install -e '.[train]'` | mjlab、RSL-RL 和实验记录工具 |
 | 录制 Pico 真机数据 | `pip install -e '.[recording]'` | Pico 运行环境和 MP4 写入依赖 |
@@ -162,4 +163,4 @@ python scripts/run/run_sim.py \
 ```
 
 MuJoCo 窗口能够打开，仿真 G1 能跟随示例动作，就说明安装完成。关闭窗口即可停止，
-然后进入四条任务教程之一。
+然后进入七条任务教程之一。

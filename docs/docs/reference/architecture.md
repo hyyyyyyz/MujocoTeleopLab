@@ -16,6 +16,16 @@ G1 reference. `VelCmdObservationBuilder` combines that reference with robot
 state, and the dual-input TemporalCNN ONNX controller produces 29 joint offsets.
 The same observation and controller path drives MuJoCo and the real G1.
 
+XRoboToolkit table-top teleoperation is a separate simulation pipeline. A
+Python 3.12 bridge forwards HMD/controller samples over localhost UDP to an
+isolated Python 3.10 process, which runs the released 43-DOF decoupled-WBC
+scene (29 G1 body joints plus two seven-DOF Dex3 hands), arm/hand IK, object
+collisions, and MuJoCo PD. Its Remote Vision worker renders the
+`scene_head_camera`; the first valid HMD orientation is neutral and subsequent
+head rotation drives the camera orientation while HMD translation is ignored.
+This scene runtime does not use the learned 29-DOF motion-tracking policy and
+must not run alongside the standard XRoboToolkit sim2sim pipeline.
+
 Pico hand and active-vision paths are optional process-isolated workers. They
 reuse the same in-process `PicoBridge` receiver and never add fields to the 167D
 tracking-policy observation. A hand or neck failure must not stop G1 body
@@ -59,6 +69,11 @@ teleopit/                              — Core inference and deployment package
 ├── configs/                          — Hydra runtime configuration
 ├── bus/                              — In-process zero-copy publish/subscribe
 ├── inputs/                           — BVH, PICO and realtime input adapters
+├── scenes/                           — 43-DOF XRoboToolkit table-top scene runtime
+│   ├── controller.py                 — SIMPLE-compatible joystick/hand mapping
+│   ├── runtime.py                    — decoupled-WBC, IK, MuJoCo and PD loop
+│   ├── video.py                      — scene camera renderer and Remote Vision
+│   └── view_state.py                 — HMD camera orientation and view toggle state
 ├── retargeting/gmr/                  — Self-contained whole-body GMR implementation
 ├── controllers/                      — Observation builder and ONNX policy controller
 ├── robots/                           — MuJoCo robot adapter
@@ -78,6 +93,9 @@ train_mimic/                          — Training package
 
 scripts/                              — User-facing runtime and maintenance entry points
 ├── run/                              — Simulation, sim2real and recording commands
+│   ├── run_scene_xr_bridge.py        — Python 3.12 XRoboToolkit → localhost UDP bridge
+│   ├── run_scene_teleop.py           — Python 3.10 43-DOF scene runtime
+│   └── start_scene_teleop.sh         — starts both scene processes
 ├── setup/                            — Asset download and hardware setup
 ├── render/                           — Offline video rendering
 ├── view/                             — Recording review
@@ -108,6 +126,8 @@ tests/                                — Unit, protocol and integration tests
 | Host-policy observation | JPEG RGB + G1 joint position (29D) + raw O6 readback (12D) + OpenNeck degrees (2D); request also carries the camera-time active reference root pose (7D) |
 | Host-policy action | `float32[T,50]`, 30 Hz source horizon, `T` in `[1,50]` |
 | Host-policy body control | 36D root/joint reference through the existing 50 Hz motion tracker |
+| XRoboToolkit scene control | 43-DOF MuJoCo G1/Dex3 decoupled-WBC scene; 200 Hz PD / 50 Hz WBC |
+| Scene Remote Vision | H.264 side-by-side stream from `scene_head_camera`; HMD rotation controls view |
 
 ## Constraints
 
@@ -142,6 +162,7 @@ Runtime commands:
 
 - `scripts/run/run_sim.py` — offline BVH and live PICO sim2sim
 - `scripts/run/run_sim2real.py` — BVH or PICO G1 sim2real
+- `scripts/run/start_scene_teleop.sh` — XRoboToolkit 43-DOF MuJoCo scene teleoperation
 - `scripts/run/run_high_level_policy_sim2real.py` — independent host-policy G1 deployment
 - `scripts/run/record_pico_motion.py` — record retargeted motion clips from PICO
 - `scripts/render/render_sim.py` — render mocap, retargeting, and sim2sim videos

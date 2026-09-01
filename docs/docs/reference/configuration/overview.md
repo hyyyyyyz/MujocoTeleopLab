@@ -14,6 +14,7 @@ Runtime assembly is centralized in `teleopit/runtime/`. Scripts, `TeleopPipeline
 |--------|----------|
 | `teleopit/configs/default.yaml` | Offline sim2sim (BVH playback) |
 | `teleopit/configs/pico4_sim.yaml` | Pico 4 VR sim2sim |
+| `teleopit/configs/xrobotoolkit_sim.yaml` | XRoboToolkit body-tracking sim2sim |
 | `teleopit/configs/sim2real.yaml` | BVH sim2real on Unitree G1 |
 | `teleopit/configs/pico4_sim2real.yaml` | Pico 4 VR sim2real on Unitree G1 |
 | `teleopit/configs/high_level_policy_sim2real.yaml` | Independent host-policy sim2real on Unitree G1 |
@@ -24,6 +25,23 @@ These compose sub-configs:
 - `teleopit/configs/controller/rl_policy.yaml`
 - `teleopit/configs/input/bvh.yaml` — offline BVH input
 - `teleopit/configs/input/pico4.yaml` — Pico 4 input through the pico-bridge receiver on the Teleopit host
+- `teleopit/configs/input/xrobotoolkit.yaml` — XRoboToolkit PC Service input through the local SDK
+
+The repository also includes a local XRoboToolkit preset at
+`local/pico4_xrobotoolkit_mujoco.yaml`. It composes `xrobotoolkit_sim`, enables
+the MuJoCo camera stream, and reads the current Pico address from
+`PICO_VIDEO_HOST`:
+
+```bash
+PICO_VIDEO_HOST=<Pico IPv4> python scripts/run/run_sim.py \
+    --config-dir "$PWD/local" \
+    --config-name pico4_xrobotoolkit_mujoco \
+    controller.policy_path=ckpt/track_g1.onnx
+```
+
+The base `xrobotoolkit_sim` profile leaves video disabled. The XRoboToolkit
+input fields and direct/legacy Remote Vision options are listed in the field
+reference below.
 
 ## Override Examples
 

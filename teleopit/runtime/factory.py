@@ -232,13 +232,13 @@ def _build_input_provider(
             timeout=float(cfg_get(input_cfg, "pico4_timeout", 60.0)),
             buffer_size=int(cfg_get(input_cfg, "pico4_buffer_size", 60)),
             timestamp_gap_reset_s=float(cfg_get(input_cfg, "pico4_timestamp_gap_reset_s", 0.15)),
-            pause_button=cfg_get(input_cfg, "pause_button", "A"),
-            pause_debounce_s=float(cfg_get(input_cfg, "pause_debounce_s", 0.25)),
-            arms_button=cfg_get(input_cfg, "arms_button", "B"),
-            arms_debounce_s=float(cfg_get(input_cfg, "arms_debounce_s", 0.25)),
+            activation_trigger_threshold=float(cfg_get(input_cfg, "activation_trigger_threshold", 0.5)),
+            reset_grip_threshold=float(cfg_get(input_cfg, "reset_grip_threshold", 0.5)),
+            control_debounce_s=float(cfg_get(input_cfg, "control_debounce_s", 0.25)),
             poll_hz=float(cfg_get(input_cfg, "xrobotoolkit_poll_hz", 120.0)),
             close_sdk=bool(cfg_get(input_cfg, "xrobotoolkit_close_sdk", True)),
             sdk_shutdown_settle_s=float(cfg_get(input_cfg, "xrobotoolkit_shutdown_settle_s", 1.0)),
+            sdk_close_timeout_s=float(cfg_get(input_cfg, "xrobotoolkit_close_timeout_s", 2.0)),
         )
 
     return bvh_input_cls(

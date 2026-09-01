@@ -723,8 +723,37 @@ class TeleopitHDF5Recorder:
             import imageio.v2 as imageio
         except Exception as exc:
             raise RuntimeError("MP4 recording requires imageio[ffmpeg]") from exc
+
+        # ImageIO 2 can select either its legacy ``imageio-ffmpeg`` backend or
+        # the newer PyAV plugin.  The two backends intentionally expose
+        # different writer keyword arguments: ``quality``, ``macro_block_size``
+        # and ``pixelformat`` belong to imageio-ffmpeg, while PyAV expects
+        # ``out_pixel_format`` and writes one image per ``append_data`` call.
+        # The base project only depends on ``imageio`` (the ffmpeg executable
+        # is an optional recording extra), and recent environments commonly
+        # have PyAV installed through pico-bridge.  Select the backend
+        # explicitly so a valid installation does not fail lazily on the first
+        # frame with ``unexpected keyword argument 'quality'``.
+        try:
+            import imageio_ffmpeg  # noqa: F401
+        except ImportError:
+            try:
+                return imageio.get_writer(
+                    str(path),
+                    format="pyav",
+                    fps=self._fps,
+                    codec=self._video_config.codec,
+                    out_pixel_format=self._video_config.pixelformat,
+                    is_batch=False,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "MP4 recording requires imageio[ffmpeg] or the PyAV package"
+                ) from exc
+
         return imageio.get_writer(
             str(path),
+            format="FFMPEG",
             fps=self._fps,
             codec=self._video_config.codec,
             quality=self._video_config.quality,

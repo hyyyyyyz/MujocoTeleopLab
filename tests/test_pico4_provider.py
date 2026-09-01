@@ -323,7 +323,33 @@ def test_pico4_provider_marks_controller_present_without_raw_field() -> None:
     assert snapshot.left.trigger == pytest.approx(0.4)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -0.1, 1.1, "0.5", True, [0.5]])
+def test_pico4_provider_neutralizes_malformed_controller_axes(value: object) -> None:
+    """Bad optional axis values must not discard a valid body frame."""
+    provider = _make_provider()
+    frame = _pico_frame(_body_poses(1.0), seq=1, timestamp=1.0)
+    frame.controllers.left.axis = {"grip": value, "trigger": 0.25}
+
+    assert provider._accept_pico_frame(frame) is True
+    snapshot = provider.get_controller_snapshot()
+    assert snapshot is not None
+    assert snapshot.left.present is False
+    assert snapshot.left.grip == 0.0
+    assert snapshot.left.trigger == pytest.approx(0.25)
+
+
+def test_pico4_provider_rejects_non_boolean_button_map_values() -> None:
+    """A truthy string must never become a controller edge event."""
+    provider = _make_provider()
+    frame = _pico_frame(_body_poses(1.0), seq=1, timestamp=1.0)
+    frame.controllers.right.buttons["primaryButton"] = "false"
+
+    assert provider._accept_pico_frame(frame) is True
+    assert provider.pop_control_events() == ()
+
+
 def test_pico4_provider_reads_pause_control_events_when_body_inactive() -> None:
+    """Safety/session controls remain usable before Full-body tracking."""
     provider = _make_provider()
 
     assert provider._accept_pico_frame(
@@ -333,6 +359,81 @@ def test_pico4_provider_reads_pause_control_events_when_body_inactive() -> None:
     events = provider.pop_control_events()
     assert [event.event_type for event in events] == [ControlEventType.TOGGLE_PAUSE]
     assert provider._last_source_seq == 1
+
+
+def test_pico4_provider_polls_pause_control_after_body_tracking_starts() -> None:
+    """Once a valid body frame exists, a stationary body can still toggle."""
+    provider = _make_provider()
+    body_poses = _body_poses(1.0)
+
+    assert provider._accept_pico_frame(
+        _pico_frame(body_poses, seq=1, timestamp=1.0, right_primary=False)
+    ) is True
+    assert provider._accept_pico_frame(
+        _pico_frame(body_poses.copy(), seq=2, timestamp=1.01, right_primary=True)
+    ) is False
+
+    events = provider.pop_control_events()
+    assert [event.event_type for event in events] == [ControlEventType.TOGGLE_PAUSE]
+
+
+def test_pico4_provider_does_not_consume_y_mode_before_body_tracking() -> None:
+    """Y/X mode edges wait for a valid body frame, unlike A/B controls."""
+    provider = _make_provider()
+    inactive = _pico_frame(_body_poses(1.0), seq=1, timestamp=1.0, body_active=False)
+    inactive.controllers.left.buttons = {"secondaryButton": True}
+    assert provider._accept_pico_frame(inactive) is False
+    assert provider.pop_control_events() == ()
+
+    active = _pico_frame(_body_poses(1.0), seq=2, timestamp=1.1, body_active=True)
+    active.controllers.left.buttons = {"secondaryButton": True}
+    assert provider._accept_pico_frame(active) is True
+    events = provider.pop_control_events()
+    assert [event.event_type for event in events] == [ControlEventType.ENTER_MOCAP]
+
+
+def test_pico4_provider_does_not_consume_y_mode_from_nonfinite_body() -> None:
+    """A malformed shaped body packet must not arm a mode transition."""
+    provider = _make_provider()
+    malformed = _body_poses(1.0)
+    malformed[0, 0] = np.nan
+    frame = _pico_frame(malformed, seq=1, timestamp=1.0)
+    frame.controllers.left.buttons = {"secondaryButton": True}
+
+    assert provider._accept_pico_frame(frame) is False
+    assert provider.pop_control_events() == ()
+    assert provider.has_frame() is False
+
+
+def test_pico4_poll_loop_survives_frame_adapter_exception() -> None:
+    """One malformed bridge frame must not permanently kill input polling."""
+    provider = _make_provider()
+    provider._last_source_seq = None
+    frames = [object(), object()]
+    accepted: list[object] = []
+
+    class _Bridge:
+        def wait_frame(self, *, timeout: float = 0.1, after_seq: int | None = None) -> object:
+            del timeout, after_seq
+            if frames:
+                return frames.pop(0)
+            raise TimeoutError
+
+    provider._bridge = _Bridge()
+
+    def flaky_adapter(frame: object) -> None:
+        accepted.append(frame)
+        if len(accepted) == 1:
+            raise ValueError("malformed optional controller field")
+        provider._closed = True
+
+    provider._accept_pico_frame = flaky_adapter  # type: ignore[method-assign]
+    thread = threading.Thread(target=provider._poll_loop)
+    thread.start()
+    thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert len(accepted) == 2
 
 
 def test_pico4_provider_exposes_hand_snapshot_when_body_inactive() -> None:
@@ -352,6 +453,22 @@ def test_pico4_provider_exposes_hand_snapshot_when_body_inactive() -> None:
     assert snapshot.right.present is True
     assert snapshot.right.active is False
     np.testing.assert_allclose(snapshot.left.joints[:, 0:3], 1.5)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_pico4_provider_rejects_nonfinite_hand_joints(value: float) -> None:
+    provider = _make_provider()
+    frame = _pico_frame(_body_poses(1.0), seq=4, timestamp=2.0, body_active=False)
+    hand = _hand_state(active=True, value=0.0)
+    hand.joints[0, 0] = value
+    frame.left_hand = hand
+
+    assert provider._accept_pico_frame(frame) is False
+    snapshot = provider.get_hand_snapshot()
+    assert snapshot is not None
+    assert snapshot.left.present is True
+    assert snapshot.left.active is False
+    assert np.all(np.isfinite(snapshot.left.joints))
 
 
 def test_pico4_provider_exposes_hmd_rotation_separately_from_skeleton_head() -> None:

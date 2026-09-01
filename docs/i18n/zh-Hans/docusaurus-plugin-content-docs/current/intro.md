@@ -18,12 +18,14 @@ Pico 头显后，可以实时控制机器人的全身动作。机载部署还可
 
 1. 根据自己的目标[安装 Teleopit](getting-started/installation)，并完成该页面最后的
    安装检查。
-2. 从下面四条路径中选择一条继续。
+2. 从下面七条路径中选择一条继续。
 
 | 我想做什么 | 对应教程 |
 |------------|----------|
 | 在 MuJoCo 中检查运控策略 | [在仿真中运行运控](tutorials/offline-sim2sim) |
 | 不连接真机，先尝试 Pico VR 遥操 | [在仿真中进行 VR 遥操](tutorials/pico-sim2sim) |
+| 使用 XRoboToolkit Pico 追踪和标准 G1 sim2sim 运控器 | [在 MuJoCo 中使用 XRoboToolkit 进行 Pico 遥操作](tutorials/xrobotoolkit-sim2sim) |
+| 在 MuJoCo 中用 Pico、Dex3 和场景 WBC 操作桌面物体 | [使用 XRoboToolkit 进行桌面场景遥操作](tutorials/scene-teleop) |
 | 使用 Pico VR 控制真实 G1 | [用 VR 遥操真实 G1](tutorials/pico-sim2real) |
 | 训练并导出自己的运控策略 | [训练运控策略](tutorials/training) |
 

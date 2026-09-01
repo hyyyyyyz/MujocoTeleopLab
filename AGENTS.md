@@ -14,6 +14,20 @@ Config: Hydra/OmegaConf YAML files in `teleopit/configs/`
 InputProvider (BVH file / Pico4 VR) → Retargeter (GMR) → ObservationBuilder (167D) → Controller (dual-input TemporalCNN ONNX) → Robot (MuJoCo + PD / Unitree SDK)
 
 Host policy service → onboard policy client/scheduler → 36D reference → same ObservationBuilder/Controller → Unitree SDK
+
+XRoboToolkit MuJoCo mode streams length-framed H.264 from MuJoCo's
+`d435i_rgb` camera. Current headset builds expose a direct TCP listener (the
+local preset uses the Pico IP and port 12345); Teleopit duplicates the mono
+camera for ZEDMINI's stereo layout and reconnects until that listener opens.
+The legacy 13579 `OPEN_CAMERA` control protocol remains supported. This is
+simulation-only and separate from pico-bridge video transport.
+
+Scene teleoperation is a separate two-process runtime for 43-DOF G1/Dex3
+manipulation: the Python 3.12 XRoboToolkit bridge sends HMD/controller samples
+through localhost UDP to the isolated Python 3.10 decoupled-WBC process.  That
+process runs arm/hand IK, Balance/Walk ONNX, 200 Hz MuJoCo PD, collidable
+objects, and the scene head-camera Remote Vision sender.  Keep this path out
+of the standard 29-DOF learned motion-tracker process.
 ```
 
 Offline core modules communicate through `InProcessBus` (zero-copy). Sim2real
@@ -52,7 +66,15 @@ teleopit/                 # Core inference package
 │   ├── pico4_provider.py     # Pico4InputProvider — pico_bridge receiver input
 │   ├── pico_video.py         # Optional camera preview pushed back to Pico through pico-bridge
 │   ├── rot_utils.py          # Quaternion helpers for input-space transforms
-│   └── udp_bvh_provider.py   # UDPBVHInputProvider — realtime BVH packet input
+│   ├── udp_bvh_provider.py   # UDPBVHInputProvider — realtime BVH packet input
+│   └── xrobotoolkit_video.py # Legacy XRoboToolkit OPEN_CAMERA video runtime
+├── scenes/                   # Separate 43-DOF G1/Dex3 manipulation runtime
+│   ├── controller.py         # SIMPLE-compatible Pico controller mapping
+│   ├── runtime.py            # MuJoCo/WBC/IK scene assembly and PD loop
+│   ├── video.py              # Scene camera renderer and Remote Vision worker
+│   ├── view_state.py         # HMD camera orientation and view-mode state
+│   ├── xr_packet.py          # Local UDP bridge protocol for XRoboToolkit
+│   └── xr_video_transport.py # Direct TCP H.264 transport to Pico
 ├── retargeting/
 │   ├── core.py           # RetargetingModule + extract_mimic_obs()
 │   └── gmr/              # Self-contained GMR code; heavyweight assets are downloaded into an ignored path
@@ -70,10 +92,15 @@ scripts/
 ├── run/run_sim.py        # Offline sim2sim pipeline
 ├── run/run_sim2real.py   # G1 sim2real control; supports offline BVH playback and Pico4
 ├── run/run_high_level_policy_sim2real.py # Independent host-policy deployment runtime
+├── run/run_scene_xr_bridge.py # Python 3.12 XRoboToolkit → localhost UDP bridge
+├── run/run_scene_teleop.py  # Python 3.10 43-DOF scene runtime
+├── run/start_scene_teleop.sh # Starts the bridge and scene runtime together
 ├── run/record_pico_motion.py # Interactive Pico recording → G1 motion NPZ clips
 ├── render/render_sim.py  # Render single BVH → 3 MuJoCo videos (mocap input, retarget, sim2sim)
 ├── view/view_recording.py # Read-only synchronized sim2real recording reviewer
-└── dev/compute_ik_offsets.py # Compute IK quaternion offsets for new BVH formats
+└── dev/
+    ├── compute_ik_offsets.py # Compute IK quaternion offsets for new BVH formats
+    └── smoke_scene_teleop.py # Reproducible G1/Dex3 cube contact/motion check
 train_mimic/              # Training package
 ├── app.py                # Shared app helpers for train/play/benchmark
 ├── tasks/tracking/config/
@@ -98,6 +125,14 @@ train_mimic/              # Training package
 - Policy runs at 50Hz, PD control at 200Hz (`decimation=4`, `sim_dt=0.005`)
 - Action flow: `compute_action()` returns raw action → `get_target_dof_pos()` applies clip `[-10, 10]`, scale, and `default_dof_pos`
 - `assets/robots/unitree_g1/g1_29dof.xml` is the default G1 XML, not a model allowlist; training can select another task-compatible model with `--robot_xml`, and each workflow should keep its robot joint/body definitions consistent
+
+### XRoboToolkit Table-top Scene Teleoperation
+- This is an independent physics-based MuJoCo simulation path for 43 actuators: 29 G1 body joints and two seven-DOF Dex3 hands. It is simulation-only, does not issue real-robot commands, does not use the learned 29-DOF motion-tracking policy, and must not run alongside `run_sim.py` because both claim XRoboToolkit.
+- Install its isolated Python 3.10 stack with `bash scripts/setup/setup_scene_teleop.sh`, then start it with `PICO_VIDEO_HOST=<Pico IPv4> bash scripts/run/start_scene_teleop.sh --scene cube`. The bridge remains in the regular Python 3.12 `.venv` because loading its SDK alongside Pinocchio is unsupported.
+- Bundled scenes are `cube`, `bottle`, and `box`; custom sources must expose exactly the released 43 actuator names. `scene_head_camera` is inserted at runtime, leaving the source XML read-only.
+- Pico needs only Head, Controller, and Send. The first valid HMD orientation becomes the scene camera's neutral reference; subsequent HMD yaw/pitch/roll rotates `scene_head_camera`, while HMD translation is ignored because the camera remains mounted to the MuJoCo torso. Left `Menu` + left trigger locks/unlocks walking input while balance stays active; left `Menu` + right trigger toggles arm/hand teleoperation and calibrates the neutral wrist reference. The left stick walks/strafe, right stick turns, trigger/grip form Dex3 gestures, X/Y change base height, and both grips reset the robot, objects, WBC state, and calibration. B remains the headset Remote Vision view toggle.
+- The WBC balance policy is armed before the first physics step and after every reset, so a scene reset cannot leave the robot in the upstream passive hold mode.
+- Run `.venv_scene/bin/python scripts/dev/smoke_scene_teleop.py` after scene-control changes. It uses a deterministic Pico-compatible right-wrist/grip sequence and must observe hand-to-cube contact, at least 1 cm cube movement, and an upright root.
 
 ### Multi-Viewer Support
 `SimulationLoop` supports multiple simultaneous viewer windows controlled by the `viewers` config:
@@ -150,8 +185,8 @@ target_dof_pos = clip(action, -10, 10) × action_scale + default_dof_pos
 - The provider applies an input-space transform to match the current retarget config
 - Do not hardcode that transform as a public coordinate-system contract; validate against actual retarget/sim2sim behavior when SDK or firmware changes
 - Pico4 realtime control uses the same retargeted-reference timeline path as the shared realtime input stack
-- Pico sim2sim supports a keyboard-driven top-level mode state machine: `STANDING → MOCAP ↔ ARMS`, `X` returns to `STANDING`
-- Default Pico sim2sim keyboard mappings are `Y` → `MOCAP`, `A` → pause/resume mocap, `B` → toggle `MOCAP`/`ARMS`, `X` → back to `STANDING`, `Q` → quit
+- Pico bridge sim2sim supports a Pico-controller-driven top-level mode state machine: `STANDING → MOCAP ↔ ARMS`, `X` returns to `STANDING`; the computer keyboard remains an optional fallback
+- Default pico-bridge/controller mappings are `Y` → `MOCAP`, `A` → pause/resume mocap, `B` → toggle `MOCAP`/`ARMS`, `X` → back to `STANDING`; computer keyboard `Q` → quit. XRoboToolkit sim2sim follows SIMPLE: left `Menu` + right index trigger enters `MOCAP`, and both side grips return to `STANDING`; `B` remains Remote Vision view toggle.
 - Pico4 sim2real pause/resume is handled as a mocap-session control event (`toggle_pause`), not as a mode switch to `STANDING`
 - Default Pico/controller pause button is `A`; Unitree remote `B` also pauses/resumes Pico sim2real. Resume resets policy/reference state and yaw/XY root-offset alignment while the process-isolated realtime reference worker continues its live input timeline
 - Pico4 sim2real arms the process-isolated reference worker only when entering `MOCAP`; `STANDING` and `DAMPING` disarm it so cold startup frames do not warm-start GMR before mocap entry

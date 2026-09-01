@@ -113,6 +113,73 @@ def test_pipeline_inherits_robot_action_decode_config(monkeypatch, tmp_path: Pat
     assert captured["loop_kwargs"]["viewers"] == {"retarget", "sim2sim"}
 
 
+def test_pipeline_constructor_closes_provider_when_assembly_fails(monkeypatch, tmp_path: Path) -> None:
+    """A provider started during assembly must be closed on a later failure."""
+    closed = {"value": False}
+
+    class DummyRobot:
+        def __init__(self, cfg: object) -> None:
+            del cfg
+
+    class DummyController:
+        _expected_obs_dim = 167
+        _multi_input = True
+
+        def __init__(self, cfg: object) -> None:
+            del cfg
+
+    class DummyObsBuilder:
+        total_obs_size = 167
+
+        def __init__(self, cfg: object) -> None:
+            del cfg
+
+    class DummyInputProvider:
+        human_format = "lafan1"
+
+        def __init__(self, **kwargs: object) -> None:
+            del kwargs
+
+        def close(self) -> None:
+            closed["value"] = True
+
+    class DummyRetargeter:
+        def __init__(self, **kwargs: object) -> None:
+            del kwargs
+
+    class FailingLoop:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise RuntimeError("loop assembly failed")
+
+    policy_path = tmp_path / "policy.onnx"
+    policy_path.write_bytes(b"dummy")
+    bvh_path = tmp_path / "input.bvh"
+    bvh_path.write_text("HIERARCHY\n", encoding="utf-8")
+    xml_path = tmp_path / "robot.xml"
+    xml_path.write_text("<mujoco model='dummy'/>", encoding="utf-8")
+    cfg = OmegaConf.create(
+        {
+            "robot": {"num_actions": 3, "xml_path": str(xml_path), "default_angles": [0.0] * 3},
+            "controller": {"policy_path": str(policy_path)},
+            "input": {"provider": "bvh", "bvh_file": str(bvh_path), "bvh_format": "lafan1"},
+            "policy_hz": 50,
+            "pd_hz": 1000,
+        }
+    )
+
+    monkeypatch.setattr("teleopit.pipeline.MuJoCoRobot", DummyRobot)
+    monkeypatch.setattr("teleopit.pipeline.RLPolicyController", DummyController)
+    monkeypatch.setattr("teleopit.runtime.factory.VelCmdObservationBuilder", DummyObsBuilder)
+    monkeypatch.setattr("teleopit.pipeline.BVHInputProvider", DummyInputProvider)
+    monkeypatch.setattr("teleopit.pipeline.RetargetingModule", DummyRetargeter)
+    monkeypatch.setattr("teleopit.pipeline.SimulationLoop", FailingLoop)
+
+    with pytest.raises(RuntimeError, match="loop assembly failed"):
+        TeleopPipeline(cfg)
+    assert closed["value"] is True
+
+
 def test_pipeline_rejects_legacy_viewer_key(monkeypatch, tmp_path: Path) -> None:
     class DummyRobot:
         def __init__(self, cfg: object) -> None:

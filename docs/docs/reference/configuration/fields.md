@@ -73,8 +73,32 @@ Complete reference for Teleopit's Hydra configuration fields.
 | `input.bridge_history_size` | Pico frame history retained by the bridge | `120` |
 | `input.video.enabled` | Stream host camera preview back to Pico through pico-bridge 0.2.1 | `false` |
 | `input.video.source` | Video source: `mujoco`, `realsense`, or `test-pattern` | `null` |
-| `input.video.width` / `height` / `fps` | Video capture/render settings | `1280` / `720` / `30` |
+| `input.video.width` / `height` / `fps` | Video capture/render settings (`pico4_xrobotoolkit_mujoco` uses `1280` / `720` / `60` for the SIMPLE ZEDMINI profile) | `1280` / `720` / `30` |
 | `input.video.device` | Optional RealSense serial | `null` |
+
+### XRoboToolkit PC Service
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `input.provider` | Use the local XRoboToolkit SDK body stream | `xrobotoolkit` |
+| `input.human_format` | Retarget skeleton format emitted by the SDK adapter | `pico_bridge` |
+| `input.pico4_timeout` | Wait timeout for the first body frame (seconds) | `60` |
+| `input.pico4_buffer_size` | Number of timestamped body frames retained for interpolation | `60` |
+| `input.pico4_timestamp_gap_reset_s` | Clear frame history after a source timestamp gap (seconds) | `0.15` |
+| `input.activation_trigger_threshold` | Strict threshold for left Menu + right index trigger `MOCAP` entry | `0.5` |
+| `input.reset_grip_threshold` | Strict threshold for both side grips returning to `STANDING` | `0.5` |
+| `input.control_debounce_s` | Minimum interval between activation/reset chord edges | `0.25` |
+| `input.xrobotoolkit_poll_hz` | SDK polling frequency | `120` |
+| `input.xrobotoolkit_close_sdk` | Close the SDK binding during provider shutdown | `true` |
+| `input.xrobotoolkit_shutdown_settle_s` | Minimum SDK lifetime before shutdown to avoid the v1.0.2 feedback race (seconds) | `1.0` |
+| `input.xrobotoolkit_close_timeout_s` | Maximum wait for the SDK `close()` call during shutdown (seconds); a timed-out foreign SDK call is isolated in a daemon thread | `2.0` |
+| `input.video.direct_host` | Pico Remote Vision direct TCP listener; `null` uses legacy `OPEN_CAMERA` negotiation | `null` |
+| `input.video.direct_port` | Pico Remote Vision direct TCP listener port | `12345` |
+
+The `xrobotoolkit_sim` profile enables realtime input and keyboard fallback,
+uses `policy_hz=50`, `pd_hz=200`, and opens `mocap`, `retarget`, and `sim2sim`
+viewers. For the current headset direct listener, use the local
+`pico4_xrobotoolkit_mujoco` preset.
 
 ### Realtime
 

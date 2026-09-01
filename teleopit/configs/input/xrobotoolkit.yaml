@@ -7,14 +7,20 @@ human_height: 1.75
 pico4_timeout: 60.0
 pico4_buffer_size: 60
 pico4_timestamp_gap_reset_s: 0.15
-pause_button: A
-pause_debounce_s: 0.25
-arms_button: B
-arms_debounce_s: 0.25
+# Match SIMPLE's Pico activation/reset chords.  Do not bind A/B/X/Y: SIMPLE
+# reserves those buttons for its own camera/stance controls, and B is used by
+# XRoboToolkit Remote Vision to switch stereo/single view.
+# SIMPLE's PicoStreamer uses strict ``> 0.5`` comparisons for these chords.
+activation_trigger_threshold: 0.5
+reset_grip_threshold: 0.5
+control_debounce_s: 0.25
 xrobotoolkit_poll_hz: 120.0
 xrobotoolkit_close_sdk: true
 # Avoids the SDK v1.0.2 feedback-stream startup/shutdown race.
 xrobotoolkit_shutdown_settle_s: 1.0
+# The SDK can block forever when the PC service/headset is disconnected.  The
+# provider invokes close() in a daemon thread and waits at most this long.
+xrobotoolkit_close_timeout_s: 2.0
 video:
   enabled: false
   source: null
@@ -22,3 +28,6 @@ video:
   height: 720
   fps: 30
   device: null
+  # Newer headset apps listen for video directly instead of issuing OPEN_CAMERA.
+  direct_host: null
+  direct_port: 12345

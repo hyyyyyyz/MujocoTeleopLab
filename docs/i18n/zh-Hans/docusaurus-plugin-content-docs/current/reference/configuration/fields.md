@@ -93,6 +93,29 @@ target = clip(action, clip_range) * action_scale + default_dof_pos
 | `video.width` / `height` / `fps` | int | `1280` / `720` / `30` | 视频采集/渲染设置 |
 | `video.device` | str/null | `null` | 可选的 RealSense 序列号 |
 
+### XRoboToolkit PC Service
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `provider` | str | `xrobotoolkit` | 使用本机 XRoboToolkit SDK 身体数据流 |
+| `human_format` | str | `pico_bridge` | SDK 适配器输出的重定向骨架格式 |
+| `pico4_timeout` | float | `60` | 等待首帧身体数据的超时时间（秒） |
+| `pico4_buffer_size` | int | `60` | 插值保留的带时间戳身体帧数量 |
+| `pico4_timestamp_gap_reset_s` | float | `0.15` | 源时间戳出现间隔后清空帧历史（秒） |
+| `activation_trigger_threshold` | float | `0.5` | 左 Menu + 右食指扳机进入 `MOCAP` 的严格阈值 |
+| `reset_grip_threshold` | float | `0.5` | 双侧握把返回 `STANDING` 的严格阈值 |
+| `control_debounce_s` | float | `0.25` | 启动/复位组合键边沿之间的最小间隔 |
+| `xrobotoolkit_poll_hz` | float | `120` | SDK 轮询频率 |
+| `xrobotoolkit_close_sdk` | bool | `true` | provider 关闭时关闭 SDK 绑定 |
+| `xrobotoolkit_shutdown_settle_s` | float | `1.0` | SDK 关闭前的最短运行时间，用于避免 v1.0.2 feedback race |
+| `xrobotoolkit_close_timeout_s` | float | `2.0` | SDK `close()` 的最大等待时间（秒）；超时的原生 SDK 调用会隔离在 daemon 线程中 |
+| `video.direct_host` | str/null | `null` | Pico Remote Vision 直连 TCP 地址；为 `null` 时回退旧版 `OPEN_CAMERA` 协商 |
+| `video.direct_port` | int | `12345` | Pico Remote Vision 直连 TCP 监听端口 |
+
+`xrobotoolkit_sim` 配置启用实时输入和键盘备用控制，使用
+`policy_hz=50`、`pd_hz=200`，并打开 `mocap`、`retarget`、`sim2sim` 窗口。
+当前头显的直连视频请使用本地 `pico4_xrobotoolkit_mujoco` 预设。
+
 ## Realtime 字段
 
 实时模式相关字段，仅在 `realtime=true` 时生效。

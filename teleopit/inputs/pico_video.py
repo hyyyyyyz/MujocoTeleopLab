@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import operator
 import threading
 import time
 from typing import Any, Callable
@@ -25,6 +26,23 @@ class PicoVideoConfig:
     device: str | None = None
 
 
+def _strict_video_integer(value: object, field_name: str) -> int:
+    """Parse a camera setting without truncating floats or booleans.
+
+    Camera dimensions and frame rates cross a process/network boundary later
+    in the XRoboToolkit path.  Accept only integer scalars here so a typo such
+    as ``1280.5`` cannot silently become a different stream configuration.
+    NumPy integer scalars remain supported through ``operator.index``.
+    """
+
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{field_name} must be an integer")
+    try:
+        return int(operator.index(value))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+
+
 def parse_pico_video_config(input_cfg: Any) -> PicoVideoConfig:
     video_cfg = cfg_get(input_cfg, "video", {}) or {}
     source = cfg_get(video_cfg, "source", None)
@@ -34,9 +52,9 @@ def parse_pico_video_config(input_cfg: Any) -> PicoVideoConfig:
         raise ValueError(
             "input.video.source must be one of realsense, mujoco, or test-pattern when input.video.enabled=true"
         )
-    width = int(cfg_get(video_cfg, "width", 1280))
-    height = int(cfg_get(video_cfg, "height", 720))
-    fps = int(cfg_get(video_cfg, "fps", 30))
+    width = _strict_video_integer(cfg_get(video_cfg, "width", 1280), "input.video.width")
+    height = _strict_video_integer(cfg_get(video_cfg, "height", 720), "input.video.height")
+    fps = _strict_video_integer(cfg_get(video_cfg, "fps", 30), "input.video.fps")
     if enabled and (width <= 0 or height <= 0 or fps <= 0):
         raise ValueError("input.video.width, height, and fps must be positive when video is enabled")
     device = cfg_get(video_cfg, "device", None)

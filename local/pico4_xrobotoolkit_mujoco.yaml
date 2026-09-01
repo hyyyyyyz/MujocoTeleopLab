@@ -1,5 +1,21 @@
 defaults:
-  - /xrobotoolkit_sim
+  - ../teleopit/configs/xrobotoolkit_sim@_global_
   - _self_
 
 viewers: sim2sim
+
+input:
+  video:
+    enabled: true
+    source: mujoco
+    width: 1280
+    height: 720
+    # SIMPLE/XRoboToolkit's ZEDMINI receiver profile is 2560x720@60.
+    # The scene renders a 1280x720 eye and duplicates it side-by-side.
+    fps: 60
+    # Read the current headset address from the environment.  Pico DHCP
+    # leases can change between sessions, so this preset must not carry a
+    # stale address from an earlier connection.
+    # Launch with: PICO_VIDEO_HOST=<Pico IPv4> ... run_sim.py ...
+    direct_host: ${oc.env:PICO_VIDEO_HOST,null}
+    direct_port: 12345

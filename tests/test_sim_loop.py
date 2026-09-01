@@ -559,7 +559,6 @@ def test_simulation_loop_pause_resume_freezes_then_reanchors_live_retarget(monke
 
 
 @requires_mujoco
-@requires_mujoco
 def test_simulation_loop_realtime_keyboard_mode_transitions(monkeypatch) -> None:
     from teleopit.sim.loop import SimulationLoop
 
@@ -656,6 +655,144 @@ def test_simulation_loop_realtime_keyboard_mode_transitions(monkeypatch) -> None
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[2], np.array([0.0], dtype=np.float32), atol=1e-6)
     np.testing.assert_allclose(obs_builder.mimic_obs_calls[3], np.array([0.6], dtype=np.float32), atol=1e-6)
     assert retargeter.reset_calls == 2
+
+
+@requires_mujoco
+def test_simulation_loop_pico_controller_mode_transitions_without_terminal(monkeypatch) -> None:
+    """Pico Y/X must switch modes even when the launch terminal is not interactive."""
+    from teleopit.sim.loop import SimulationLoop
+
+    class _RealtimeInputProvider:
+        fps = 1
+        supports_mode_control_events = True
+
+        def __init__(self) -> None:
+            self._pending_events = [
+                ControlEvent(event_type=ControlEventType.ENTER_MOCAP, source="xrobotoolkit:left_menu+right_trigger"),
+            ]
+            self._packets = [
+                RealtimeInputPacket(
+                    frame={
+                        "Pelvis": (
+                            np.array([0.3, 0.0, 0.0], dtype=np.float32),
+                            np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                        )
+                    },
+                    timestamp_s=0.0,
+                    seq=0,
+                ),
+                RealtimeInputPacket(
+                    frame={
+                        "Pelvis": (
+                            np.array([0.6, 0.0, 0.0], dtype=np.float32),
+                            np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                        )
+                    },
+                    timestamp_s=1.0,
+                    seq=1,
+                    control_events=(
+                        ControlEvent(event_type=ControlEventType.ENTER_STANDING, source="xrobotoolkit:left_grip+right_grip"),
+                    ),
+                ),
+            ]
+            self._idx = 0
+
+        def has_frame(self) -> bool:
+            return True
+
+        def pop_control_events(self) -> tuple[ControlEvent, ...]:
+            events = tuple(self._pending_events)
+            self._pending_events.clear()
+            return events
+
+        def get_realtime_input_packet(self) -> RealtimeInputPacket:
+            packet = self._packets[min(self._idx, len(self._packets) - 1)]
+            self._idx += 1
+            return packet
+
+    class _InactiveKeyboardReader:
+        @property
+        def active(self) -> bool:
+            return False
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("teleopit.sim.session.TerminalKeyboardReader", _InactiveKeyboardReader)
+
+    obs_builder = _DummyObsBuilder()
+    loop = SimulationLoop(
+        robot=_DummyRobot(),
+        controller=_DummyController(),
+        obs_builder=obs_builder,
+        bus=InProcessBus(),
+        cfg={
+            "policy_hz": 50.0,
+            "pd_hz": 50.0,
+            "realtime": False,
+            "retarget_buffer_enabled": False,
+            "realtime_input_delay_s": 0.0,
+            # Device mode events must work even when this process has no
+            # interactive terminal (the normal XRoboToolkit launch path).
+            "keyboard": {"enabled": False},
+        },
+        viewers=set(),
+    )
+
+    retargeter = _DummyRetargeter()
+    result = loop.run(input_provider=_RealtimeInputProvider(), retargeter=retargeter, num_steps=3)
+
+    assert result["steps"] == 3
+    np.testing.assert_allclose(obs_builder.mimic_obs_calls[0], np.array([0.3], dtype=np.float32), atol=1e-6)
+    np.testing.assert_allclose(obs_builder.mimic_obs_calls[1:], np.zeros((2, 1), dtype=np.float32), atol=1e-6)
+    assert retargeter.reset_calls == 1
+
+
+@requires_mujoco
+def test_simulation_loop_standing_does_not_block_without_realtime_frame(monkeypatch) -> None:
+    """A charging/disconnected Pico must not freeze the standing simulator."""
+    from teleopit.sim.loop import SimulationLoop
+
+    class _NoFrameProvider:
+        fps = 50
+        supports_mode_control_events = True
+
+        def has_frame(self) -> bool:
+            return False
+
+        def pop_control_events(self) -> tuple[object, ...]:
+            return ()
+
+        def get_realtime_input_packet(self) -> RealtimeInputPacket:
+            raise AssertionError("standing mode must not wait for a missing realtime frame")
+
+    class _InactiveKeyboardReader:
+        @property
+        def active(self) -> bool:
+            return False
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("teleopit.sim.session.TerminalKeyboardReader", _InactiveKeyboardReader)
+    loop = SimulationLoop(
+        robot=_DummyRobot(),
+        controller=_DummyController(),
+        obs_builder=_DummyObsBuilder(),
+        bus=InProcessBus(),
+        cfg={
+            "policy_hz": 50.0,
+            "pd_hz": 50.0,
+            "realtime": False,
+            "retarget_buffer_enabled": False,
+            "keyboard": {"enabled": False},
+        },
+        viewers=set(),
+    )
+
+    result = loop.run(input_provider=_NoFrameProvider(), retargeter=_DummyRetargeter(), num_steps=2)
+
+    assert result["steps"] == 2
 
 
 @requires_mujoco

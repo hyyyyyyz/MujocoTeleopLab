@@ -14,6 +14,13 @@ sidebar_position: 2
 `VelCmdObservationBuilder` 把参考动作与机器人状态组合起来，双输入 TemporalCNN
 ONNX 运控器再输出 29 维关节偏移。同一套观测和运控器路径同时用于 MuJoCo 和真机 G1。
 
+XRoboToolkit 桌面场景遥操作是独立的仿真流程。Python 3.12 桥接器通过 localhost UDP
+把 HMD/手柄样本发送到隔离的 Python 3.10 进程；该进程运行已发布的 43 自由度解耦 WBC
+场景（29 个 G1 身体关节和两只七自由度 Dex3 手）、手臂/手部 IK、物体碰撞与 MuJoCo PD。
+其 Remote Vision worker 渲染 `scene_head_camera`；第一份有效 HMD 姿态作为中立方向，之后
+的头部旋转驱动相机朝向，HMD 平移会被忽略。此场景运行时不使用学习得到的 29 自由度全身
+追踪策略，也不能与标准 XRoboToolkit sim2sim 流程同时运行。
+
 Pico 手部和主动视觉路径是可选的进程隔离 worker。它们复用同一个进程内
 `PicoBridge` 接收器，不会向 167 维运控策略观测增加字段。手部或颈部故障不能停止
 G1 身体控制。这些可选硬件路径只支持机载部署；外部主机 Pico 部署只支持全身控制。
@@ -49,6 +56,11 @@ teleopit/                              — 核心推理和部署包
 ├── configs/                          — Hydra 运行时配置
 ├── bus/                              — 进程内零拷贝发布/订阅
 ├── inputs/                           — BVH、PICO 和实时输入适配器
+├── scenes/                           — 43 自由度 XRoboToolkit MuJoCo 桌面场景运行时
+│   ├── controller.py                 — SIMPLE 兼容的摇杆/手势映射
+│   ├── runtime.py                    — 解耦 WBC、IK、MuJoCo 和 PD 循环
+│   ├── video.py                      — 场景相机渲染与 Remote Vision
+│   └── view_state.py                 — HMD 相机朝向与视图切换状态
 ├── retargeting/gmr/                  — 自包含的全身 GMR 实现
 ├── controllers/                      — 观测构建器和 ONNX 策略运控器
 ├── robots/                           — MuJoCo 机器人适配器
@@ -68,6 +80,9 @@ train_mimic/                          — 训练包
 
 scripts/                              — 面向用户的运行和维护入口
 ├── run/                              — 仿真、sim2real 和录制命令
+│   ├── run_scene_xr_bridge.py        — Python 3.12 XRoboToolkit → localhost UDP 桥接
+│   ├── run_scene_teleop.py           — Python 3.10 43 自由度场景运行时
+│   └── start_scene_teleop.sh         — 启动两个场景进程
 ├── setup/                            — 资源下载和硬件设置
 ├── render/                           — 离线视频渲染
 ├── view/                             — 录制数据检查
@@ -98,6 +113,8 @@ tests/                                — 单元、协议和集成测试
 | 主机策略观测 | JPEG RGB + G1 关节位置（29 维）+ O6 原始 readback（12 维）+ OpenNeck 角度（2 维）；请求还携带相机时刻的 active reference root pose（7 维） |
 | 主机策略动作 | `float32[T,50]`，30 Hz 源时间线，`T` 在 `[1,50]` 内 |
 | 主机策略身体控制 | 36 维根部/关节参考，通过现有 50 Hz motion tracker |
+| XRoboToolkit 场景控制 | 43 自由度 MuJoCo G1/Dex3 解耦 WBC 场景；200 Hz PD / 50 Hz WBC |
+| 场景 Remote Vision | 来自 `scene_head_camera` 的 H.264 并排双目流；HMD 旋转控制视角 |
 
 ## 约束
 
@@ -129,6 +146,7 @@ sim2real，以及独立主机高层策略 G1 sim2real。
 
 - `scripts/run/run_sim.py` — 离线 BVH 和 PICO 实时 sim2sim
 - `scripts/run/run_sim2real.py` — BVH 或 PICO G1 sim2real
+- `scripts/run/start_scene_teleop.sh` — XRoboToolkit 43 自由度 MuJoCo 桌面场景遥操作
 - `scripts/run/run_high_level_policy_sim2real.py` — 独立主机高层策略 G1 部署
 - `scripts/run/record_pico_motion.py` — 从 PICO 录制重定向动作 clip
 - `scripts/render/render_sim.py` — 渲染 mocap、重定向和 sim2sim 视频

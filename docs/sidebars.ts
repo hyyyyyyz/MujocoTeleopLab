@@ -17,6 +17,7 @@ const sidebars: SidebarsConfig = {
         'tutorials/offline-sim2sim',
         'tutorials/pico-sim2sim',
         'tutorials/xrobotoolkit-sim2sim',
+        'tutorials/scene-teleop',
         'tutorials/pico-sim2real',
         'tutorials/high-level-policy-sim2real',
         'tutorials/training',

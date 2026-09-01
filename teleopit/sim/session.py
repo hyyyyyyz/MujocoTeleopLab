@@ -37,7 +37,7 @@ from teleopit.runtime.arm_mocap import compose_arm_reference_window
 from teleopit.runtime.mocap_session import MocapSessionManager, MocapSessionState
 from teleopit.runtime.offline_playback import OfflinePlaybackController
 from teleopit.runtime.terminal_keyboard import TerminalKeyboardReader
-from teleopit.inputs.realtime_packet import ControlEventType
+from teleopit.inputs.realtime_packet import ControlEventType, RealtimeInputPacket
 
 if TYPE_CHECKING:
     from teleopit.sim.loop import SimulationLoop, SimulationMode
@@ -158,6 +158,16 @@ class SimLoopSession:
         self.latest_live_human_frame: dict | None = None
         self.latest_live_retargeted: Float64Array | None = None
         self.latest_live_timestamp: float | None = None
+        # A realtime packet is still sampled while STANDING so controller
+        # events can be delivered even when retargeting is disabled.  Keep the
+        # most recent standing packet around: a keyboard/legacy control event
+        # can switch to MOCAP between two loop iterations, and the first
+        # active step should consume the frame that was already observed
+        # instead of skipping ahead to the provider's next sample.  This is
+        # especially important for providers that expose only their latest
+        # packet (rather than a replayable queue).
+        self._standing_realtime_packet: RealtimeInputPacket[dict] | None = None
+        self._pending_realtime_packet: RealtimeInputPacket[dict] | None = None
 
         # Mocap session + motion state
         self.mocap_session: MocapSessionManager = MocapSessionManager()
@@ -180,16 +190,32 @@ class SimLoopSession:
             keyboard_reader = None
         self.keyboard_reader: TerminalKeyboardReader | None = keyboard_reader
 
+        supports_pico_mode_controls = bool(getattr(input_provider, "supports_mode_control_events", False))
         self.realtime_keyboard_mode_enabled: bool = bool(
             self.realtime_interpolated_input
             and loop._realtime_keyboard_enabled
-            and self.keyboard_reader is not None
-            and self.keyboard_reader.active
+            and (
+                (self.keyboard_reader is not None and self.keyboard_reader.active)
+                or supports_pico_mode_controls
+            )
+        )
+        # Device-generated mode events (for example XRoboToolkit's
+        # Menu+trigger/dual-grip chords) are independent of whether the
+        # launch terminal has an interactive keyboard.  Keep a separate flag
+        # so a headless/non-TTY run still starts in STANDING and can traverse
+        # the Pico state machine.  The keyboard-specific flag above remains
+        # for compatibility with callers that inspect it.
+        self.realtime_mode_control_enabled: bool = bool(
+            self.realtime_interpolated_input
+            and (
+                supports_pico_mode_controls
+                or (self.keyboard_reader is not None and self.keyboard_reader.active)
+            )
         )
 
         from teleopit.sim.loop import SimulationMode
         self.simulation_mode: SimulationMode = (
-            SimulationMode.STANDING if self.realtime_keyboard_mode_enabled else SimulationMode.MOCAP
+            SimulationMode.STANDING if self.realtime_mode_control_enabled else SimulationMode.MOCAP
         )
         if self.simulation_mode == SimulationMode.STANDING:
             loop._set_standing_reference(loop.robot.get_state())
@@ -228,6 +254,8 @@ class SimLoopSession:
         self.last_live_packet_seq = -1
         self.cached_human_frame = None
         self.cached_retargeted = None
+        self._standing_realtime_packet = None
+        self._pending_realtime_packet = None
 
     def reset_policy_reference_state(self, *, reset_mocap_session: bool = True) -> None:
         self._step_runner.reset()
@@ -244,12 +272,20 @@ class SimLoopSession:
         self._loop._set_standing_reference(self._loop.robot.get_state())
         self.simulation_mode = SimulationMode.STANDING
 
-    def enter_mocap_mode(self) -> bool:
+    def enter_mocap_mode(self, *, preserve_standing_packet: bool = True) -> bool:
         from teleopit.sim.loop import SimulationMode
         loop = self._loop
         if not loop._realtime_input_has_frame(self._input_provider):
             _logger.warning("Cannot switch to MOCAP yet: realtime input has no frame available")
             return False
+        # ``reset_policy_reference_state`` clears the live-frame timeline.
+        # Preserve the packet already sampled during STANDING so a mode edge
+        # that is handled outside ``_fetch_realtime_input`` (keyboard or the
+        # legacy pop-control-events API) does not discard one input frame.  An
+        # event embedded in the packet currently being fetched passes
+        # ``preserve_standing_packet=False`` below; that packet is processed
+        # immediately by the same call and must not be replayed next cycle.
+        standing_packet = self._standing_realtime_packet if preserve_standing_packet else None
         state = loop.robot.get_state()
         start_qpos = loop._resolve_hold_qpos(None, None, None, state)
         # STANDING does not run retargeting, so the live subject may have
@@ -259,6 +295,8 @@ class SimLoopSession:
         self.reset_policy_reference_state()
         self._step_runner.last_retarget_qpos = start_qpos.copy()
         self.last_commanded_motion_qpos = start_qpos.copy()
+        if standing_packet is not None:
+            self._pending_realtime_packet = standing_packet
         self.simulation_mode = SimulationMode.MOCAP
         return True
 
@@ -460,16 +498,29 @@ class SimLoopSession:
     def _fetch_realtime_input(self) -> tuple[bool, ReferenceWindow | None, RealtimeReferenceDiagnostics | None, bool]:
         """Fetch input from realtime provider. Returns (new_bvh_frame, ref_window, diag, should_continue)."""
         loop = self._loop
-        packet = loop._fetch_realtime_input_packet(self._input_provider, self.last_live_packet_seq)
+        packet = self._pending_realtime_packet
+        if packet is not None:
+            # Consume the one-shot packet captured in STANDING.  It is safe to
+            # replay it once because ``reset_runtime_tracking`` reset the live
+            # sequence watermark before the hand-off.
+            self._pending_realtime_packet = None
+        else:
+            packet = loop._fetch_realtime_input_packet(self._input_provider, self.last_live_packet_seq)
         human_frame = cast(dict, packet.frame)
         frame_timestamp = float(packet.timestamp_s)
         frame_seq = int(packet.seq)
-        for control_event in packet.control_events:
-            if control_event.event_type == ControlEventType.TOGGLE_ARMS:
-                self.toggle_arms_mode()
-                continue
-            if control_event.event_type == ControlEventType.TOGGLE_PAUSE:
-                self.toggle_realtime_mocap_pause()
+        self._apply_realtime_control_events(packet.control_events, preserve_standing_packet=False)
+        # A controller X event can arrive while this method is fetching a
+        # MOCAP frame.  Do not let that same frame command one final live
+        # retargeted pose after switching to STANDING.
+        from teleopit.sim.loop import SimulationMode
+        if self.simulation_mode == SimulationMode.STANDING:
+            # Retain this packet for a possible keyboard/legacy MOCAP entry on
+            # the next iteration.  It has already been used to process button
+            # events, so retaining it does not duplicate any event edge.
+            self._standing_realtime_packet = packet
+            new_bvh_frame, reference_window, realtime_reference_diag = self._fetch_standing_input()
+            return new_bvh_frame, reference_window, realtime_reference_diag, False
         new_bvh_frame = frame_seq != self.last_live_packet_seq
 
         if self.mocap_session.state == MocapSessionState.PAUSED:
@@ -553,7 +604,6 @@ class SimLoopSession:
             else:
                 self.cached_retargeted = self.latest_live_retargeted
 
-        from teleopit.sim.loop import SimulationMode
         if self.simulation_mode == SimulationMode.ARMS:
             self.cached_retargeted = loop._compose_arm_reference(cast(Float64Array, self.cached_retargeted))
             if reference_window is not None:
@@ -566,6 +616,33 @@ class SimLoopSession:
                 )
 
         return new_bvh_frame, reference_window, realtime_reference_diag, False
+
+    def _apply_realtime_control_events(
+        self,
+        events: tuple[object, ...],
+        *,
+        preserve_standing_packet: bool = True,
+    ) -> None:
+        """Apply Pico/controller mode events in both STANDING and MOCAP states.
+
+        Events drained between loop iterations (keyboard/legacy providers)
+        should preserve the packet sampled while standing.  Events carried by
+        the packet currently being fetched are handled in-place and therefore
+        must not enqueue that previous packet for a second pass.
+        """
+        for control_event in events:
+            event_type = getattr(control_event, "event_type", None)
+            if event_type == ControlEventType.ENTER_MOCAP:
+                self.enter_mocap_mode(preserve_standing_packet=preserve_standing_packet)
+                continue
+            if event_type == ControlEventType.ENTER_STANDING:
+                self.enter_standing_mode()
+                continue
+            if event_type == ControlEventType.TOGGLE_ARMS:
+                self.toggle_arms_mode()
+                continue
+            if event_type == ControlEventType.TOGGLE_PAUSE:
+                self.toggle_realtime_mocap_pause()
 
     def _fetch_simple_bvh_input(self, frame_f: float) -> tuple[bool, bool]:
         """Fetch input from simple BVH (non-offline-reference) provider. Returns (new_bvh_frame, should_break)."""
@@ -591,10 +668,21 @@ class SimLoopSession:
         self._step_runner.reset()
         self._viewer_manager.ensure_mocap_viewer(cast(object, self._input_provider))
         self._viewer_manager.wait_until_ready(timeout_s=10.0)
+        # A realtime provider can block waiting for its first headset frame
+        # before the main simulation loop reaches its normal viewer write.
+        # Seed the independent viewer process with the robot reset qpos now;
+        # otherwise its shared qpos array remains all zero and renders G1
+        # beneath the floor while the operator is connecting Pico.
+        self._viewer_manager.write_sim2sim(loop.robot)
+        self._viewer_manager.write_camera(loop.robot)
 
         try:
             if loop._video_runtime is not None:
                 loop._video_runtime.start()
+                # Realtime input can wait indefinitely for the first headset
+                # body packet.  Send the reset-pose camera frame now so Pico
+                # Remote Vision does not stay blank while tracking is armed.
+                loop._video_runtime.tick()
             while self.steps_done < self.max_steps:
                 if self.has_viewers and not self._viewer_manager.any_active():
                     break
@@ -613,8 +701,8 @@ class SimLoopSession:
                         if self.playback_stop_requested:
                             break
 
-                if self.realtime_keyboard_mode_enabled and self.simulation_mode == SimulationMode.STANDING:
-                    loop._drain_realtime_control_events(self._input_provider)
+                if self.realtime_mode_control_enabled and self.simulation_mode == SimulationMode.STANDING:
+                    self._apply_realtime_control_events(loop._drain_realtime_control_events(self._input_provider))
 
                 # --- Compute time/frame ---
                 policy_time = self.steps_done * self.policy_dt
@@ -627,8 +715,39 @@ class SimLoopSession:
                 realtime_reference_diag: RealtimeReferenceDiagnostics | None = None
                 new_bvh_frame = False
 
-                if self.realtime_keyboard_mode_enabled and self.simulation_mode == SimulationMode.STANDING:
-                    new_bvh_frame, reference_window, realtime_reference_diag = self._fetch_standing_input()
+                if self.simulation_mode == SimulationMode.STANDING:
+                    # Atomic realtime providers carry their mode events in
+                    # ``get_realtime_input_packet()`` and may not expose the
+                    # legacy ``pop_control_events()`` side channel.  Consume
+                    # one packet while standing so a Pico Y/X edge can leave
+                    # STANDING even without an interactive terminal.  The
+                    # realtime fetch method switches back to the static
+                    # standing pose when no mode event is present, so this
+                    # does not retarget or command a live frame prematurely.
+                    # ``get_realtime_input_packet`` is allowed to wait for the
+                    # first body sample (the Pico providers use their
+                    # configured startup timeout).  Keep the simulator in a
+                    # safe, visible standing pose while the headset is off,
+                    # charging, or still connecting; a no-frame check is
+                    # available on both supported realtime providers.  A
+                    # packet cached before a keyboard/device mode edge must
+                    # still be consumed even if the provider has since
+                    # reported the frame as unavailable.
+                    realtime_frame_ready = (
+                        self._pending_realtime_packet is not None
+                        or loop._realtime_input_has_frame(self._input_provider)
+                    )
+                    if self.realtime_packet_input and realtime_frame_ready:
+                        (
+                            new_bvh_frame,
+                            reference_window,
+                            realtime_reference_diag,
+                            should_continue,
+                        ) = self._fetch_realtime_input()
+                        if should_continue:
+                            continue
+                    else:
+                        new_bvh_frame, reference_window, realtime_reference_diag = self._fetch_standing_input()
                 elif self.offline_reference is not None:
                     if self.offline_playback is None:
                         raise RuntimeError("Offline playback controller must be initialized for offline references")
@@ -650,7 +769,7 @@ class SimLoopSession:
 
                 # --- Policy step ---
                 state = loop.robot.get_state()
-                if self.realtime_keyboard_mode_enabled and self.simulation_mode == SimulationMode.STANDING:
+                if self.simulation_mode == SimulationMode.STANDING:
                     preparation = self._step_runner.prepare_static_motion_command(self.cached_retargeted)
                     if obs_builder_requires_reference_window(loop.obs_builder):
                         reference_window = build_static_reference_window(

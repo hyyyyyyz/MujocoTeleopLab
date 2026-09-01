@@ -1,0 +1,20 @@
+diff --git a/bindings/py_bindings.cpp b/bindings/py_bindings.cpp
+index 0000000..0000000 100644
+--- a/bindings/py_bindings.cpp
++++ b/bindings/py_bindings.cpp
+@@ -497,6 +497,14 @@ int SendBytesToDeviceWrapper(const std::string& dev_id, pybind11::bytes blob) {
+ PYBIND11_MODULE(xrobotoolkit_sdk, m) {
+     m.def("init", &init, "Initialize the PXREARobot SDK.");
+-    m.def("close", &deinit, "Deinitialize the PXREARobot SDK.");
++    // PXREADeinit joins native SDK workers.  Release Python's GIL while it
++    // waits so callers can put the potentially blocking close in a bounded
++    // helper thread during shutdown.
++    m.def(
++        "close",
++        &deinit,
++        pybind11::call_guard<pybind11::gil_scoped_release>(),
++        "Deinitialize the PXREARobot SDK."
++    );
+     m.def("get_left_controller_pose", &getLeftControllerPose, "Get the left controller pose.");
+     m.def("get_right_controller_pose", &getRightControllerPose, "Get the right controller pose.");
+     m.def("get_headset_pose", &getHeadsetPose, "Get the headset pose.");

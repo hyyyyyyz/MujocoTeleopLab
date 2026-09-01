@@ -216,11 +216,18 @@ class SimulationLoop:
         get_packet = getattr(input_provider, "get_frame_packet", None)
         if callable(get_packet):
             frame, frame_timestamp, frame_seq = cast(tuple[dict, float, int], get_packet())
+            # A few realtime providers expose the legacy split API
+            # (``get_frame_packet`` + ``pop_control_events``) instead of the
+            # newer atomic ``get_realtime_input_packet``.  Preserve control
+            # events in that fallback path; otherwise a pause/mode chord
+            # arriving while MOCAP/ARMS is active would be silently dropped.
+            pop_control_events = getattr(input_provider, "pop_control_events", None)
+            control_events = tuple(pop_control_events()) if callable(pop_control_events) else ()
             return RealtimeInputPacket(
                 frame=frame,
                 timestamp_s=float(frame_timestamp),
                 seq=int(frame_seq),
-                control_events=(),
+                control_events=control_events,
             )
 
         raise TypeError("Realtime interpolated input must provide get_frame_packet()")

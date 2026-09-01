@@ -57,6 +57,7 @@ goal; you can install another extra later in the same environment.
 |------|-----------------|--------------|
 | Run a motion controller in MuJoCo | `pip install -e .` | Core inference, GMR, MuJoCo and ONNX Runtime |
 | Use Pico in simulation or on G1 | `pip install -e '.[pico4]'` | Pico receiver plus the sim2real runtime |
+| Run the XRoboToolkit table-top scene in MuJoCo | `bash scripts/setup/setup_scene_teleop.sh` | Isolated Python 3.10 decoupled-WBC, Pinocchio, Dex3 IK and scene dependencies (run `setup_xrobotoolkit.sh` first) |
 | Replay BVH on a physical G1 without Pico | `pip install -e '.[sim2real]'` | G1 runtime and OpenCV |
 | Train a controller | `pip install -e '.[train]'` | mjlab, RSL-RL and experiment loggers |
 | Record Pico sim2real episodes | `pip install -e '.[recording]'` | Pico runtime and MP4 writing |
@@ -171,4 +172,4 @@ python scripts/run/run_sim.py \
 
 The installation is ready when a MuJoCo window opens and the simulated G1
 follows the sample motion. Close the window to stop, then continue with one of
-the four task-based tutorials.
+the seven task-based tutorials.

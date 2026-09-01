@@ -75,3 +75,12 @@ include = ["teleopit*", "train_mimic*"]
 
 [tool.setuptools.package-data]
 "teleopit.high_level_policy" = ["hand_calibration.json"]
+
+[tool.pytest.ini_options]
+# ``third_party`` contains independent checkouts (decoupled_wbc, somehand,
+# Unitree SDK) whose test suites have their own optional/ROS dependencies.
+# They are runtime assets rather than part of Teleopit's test suite and must
+# not be collected by a plain ``pytest`` invocation after the local scene
+# setup clones them.
+testpaths = ["tests"]
+norecursedirs = ["third_party", ".venv", ".venv-*", ".venv_scene", "build", "dist"]

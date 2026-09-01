@@ -36,3 +36,38 @@ def test_run_sim_cfg_job_uses_hydra_cli(project_root: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "controller:" in result.stdout
     assert "input:" in result.stdout
+
+
+def test_run_sim_local_xrobotoolkit_preset_composes_from_config_dir(project_root: Path) -> None:
+    """The documented local preset must resolve its parent groups directly."""
+    result = _run_cli(
+        project_root,
+        "--config-dir",
+        str(project_root / "local"),
+        "--config-name",
+        "pico4_xrobotoolkit_mujoco",
+        "--cfg",
+        "job",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "input:" in result.stdout
+    assert "provider: xrobotoolkit" in result.stdout
+    assert "teleopit:" not in result.stdout
+
+
+def test_run_sim_local_pico4_preset_composes_from_config_dir(project_root: Path) -> None:
+    result = _run_cli(
+        project_root,
+        "--config-dir",
+        str(project_root / "local"),
+        "--config-name",
+        "pico4_mujoco_local",
+        "--cfg",
+        "job",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "input:" in result.stdout
+    assert "provider: pico4" in result.stdout
+    assert "teleopit:" not in result.stdout

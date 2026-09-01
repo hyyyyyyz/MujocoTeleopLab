@@ -14,6 +14,7 @@ Teleopit 使用 [Hydra](https://hydra.cc/) 组合配置。大多数运行入口�
 |---------|------|
 | `teleopit/configs/default.yaml` | 离线 sim2sim（BVH 回放） |
 | `teleopit/configs/pico4_sim.yaml` | Pico 4 VR sim2sim |
+| `teleopit/configs/xrobotoolkit_sim.yaml` | XRoboToolkit 身体追踪 sim2sim |
 | `teleopit/configs/sim2real.yaml` | BVH sim2real（Unitree G1 真机） |
 | `teleopit/configs/pico4_sim2real.yaml` | Pico 4 VR sim2real（Unitree G1 真机） |
 | `teleopit/configs/high_level_policy_sim2real.yaml` | 独立主机策略 sim2real（Unitree G1 真机） |
@@ -24,6 +25,21 @@ Teleopit 使用 [Hydra](https://hydra.cc/) 组合配置。大多数运行入口�
 - `teleopit/configs/controller/rl_policy.yaml`
 - `teleopit/configs/input/bvh.yaml` — 离线 BVH 输入
 - `teleopit/configs/input/pico4.yaml` — 通过 Teleopit host 上的 pico-bridge receiver 接入 Pico 4
+- `teleopit/configs/input/xrobotoolkit.yaml` — 通过本机 SDK 接入 XRoboToolkit PC Service
+
+仓库还提供本地 XRoboToolkit 预设
+`local/pico4_xrobotoolkit_mujoco.yaml`。它组合 `xrobotoolkit_sim`、开启 MuJoCo
+相机流，并从 `PICO_VIDEO_HOST` 读取当前 Pico 地址：
+
+```bash
+PICO_VIDEO_HOST=<Pico IPv4> python scripts/run/run_sim.py \
+    --config-dir "$PWD/local" \
+    --config-name pico4_xrobotoolkit_mujoco \
+    controller.policy_path=ckpt/track_g1.onnx
+```
+
+基础 `xrobotoolkit_sim` 配置默认关闭视频。XRoboToolkit 输入字段及直连/旧版
+Remote Vision 选项见下方字段参考。
 
 ## Override 示例
 
