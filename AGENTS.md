@@ -74,7 +74,7 @@ teleopit/                 # Core inference package
 │   ├── video.py              # Scene camera renderer and Remote Vision worker
 │   ├── view_state.py         # HMD camera orientation and view-mode state
 │   ├── xr_packet.py          # Local UDP bridge protocol for XRoboToolkit
-│   └── xr_video_transport.py # Direct TCP H.264 transport to Pico
+│   └── xr_video_transport.py # Direct TCP H.264 transport + legacy OPEN_CAMERA control listener
 ├── retargeting/
 │   ├── core.py           # RetargetingModule + extract_mimic_obs()
 │   └── gmr/              # Self-contained GMR code; heavyweight assets are downloaded into an ignored path
@@ -130,6 +130,7 @@ train_mimic/              # Training package
 - This is an independent physics-based MuJoCo simulation path for 43 actuators: 29 G1 body joints and two seven-DOF Dex3 hands. It is simulation-only, does not issue real-robot commands, does not use the learned 29-DOF motion-tracking policy, and must not run alongside `run_sim.py` because both claim XRoboToolkit.
 - Install its isolated Python 3.10 stack with `bash scripts/setup/setup_scene_teleop.sh`, then start it with `PICO_VIDEO_HOST=<Pico IPv4> bash scripts/run/start_scene_teleop.sh --scene cube`. The bridge remains in the regular Python 3.12 `.venv` because loading its SDK alongside Pinocchio is unsupported.
 - Bundled scenes are `cube`, `bottle`, and `box`; custom sources must expose exactly the released 43 actuator names. `scene_head_camera` is inserted at runtime, leaving the source XML read-only.
+- The scene Remote Vision sender runs the direct TCP H.264 listener probe to the headset in parallel with a best-effort legacy `OPEN_CAMERA` operator-control listener on TCP 13579 (with a PING/PONG keepalive). A legacy request is authoritative and replaces the direct target and encoder profile; binding 13579 may fail without affecting the direct path. The control port is configurable via `SceneRemoteVision(control_port=...)`.
 - Pico needs only Head, Controller, and Send. The first valid HMD orientation becomes the scene camera's neutral reference; subsequent HMD yaw/pitch/roll rotates `scene_head_camera`, while HMD translation is ignored because the camera remains mounted to the MuJoCo torso. Left `Menu` + left trigger locks/unlocks walking input while balance stays active; left `Menu` + right trigger toggles arm/hand teleoperation and calibrates the neutral wrist reference. The left stick walks/strafe, right stick turns, trigger/grip form Dex3 gestures, X/Y change base height, and both grips reset the robot, objects, WBC state, and calibration. B remains the headset Remote Vision view toggle.
 - The WBC balance policy is armed before the first physics step and after every reset, so a scene reset cannot leave the robot in the upstream passive hold mode.
 - Run `.venv_scene/bin/python scripts/dev/smoke_scene_teleop.py` after scene-control changes. It uses a deterministic Pico-compatible right-wrist/grip sequence and must observe hand-to-cube contact, at least 1 cm cube movement, and an upright root.

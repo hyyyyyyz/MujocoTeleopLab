@@ -66,6 +66,7 @@ class SceneRemoteVision:
         height: int = DEFAULT_SCENE_VIDEO_HEIGHT,
         fps: int = DEFAULT_SCENE_VIDEO_FPS,
         view_state: SceneViewState | None = None,
+        control_port: int = 13579,
     ) -> None:
         host = str(host).strip()
         if not host:
@@ -76,6 +77,9 @@ class SceneRemoteVision:
         port_i = _validated_video_int(port, "port")
         if port_i > 65535:
             raise ValueError("Remote Vision port must be in [1, 65535]")
+        control_port_i = _validated_video_int(control_port, "control port")
+        if control_port_i > 65535:
+            raise ValueError("Remote Vision control port must be in [1, 65535]")
         import mujoco
         camera_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "scene_head_camera")
         if camera_id < 0:
@@ -121,6 +125,7 @@ class SceneRemoteVision:
             # headset's TCP decoder queue; SIMPLE's reference sender likewise
             # sends one access unit per newly rendered frame.
             fps=fps_i,
+            control_port=control_port_i,
         )
 
     def start(self) -> None:

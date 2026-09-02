@@ -98,6 +98,11 @@ The scene uses SIMPLE's ZEDMINI media profile: the renderer produces one
 1280x720 eye, duplicates it side-by-side, and sends a 2560x720 H.264 stream at
 60 FPS.  If you need to reduce load for a diagnostic run, pass
 `--video-fps 30`, but keep the default 60 FPS for normal headset use.
+In parallel, the scene sender also runs a best-effort legacy operator-control
+listener on TCP 13579 so older headset builds that negotiate via `OPEN_CAMERA`
+keep working; a legacy request replaces the direct target for the rest of that
+Listen session. Binding TCP 13579 may fail (for example when another
+XRoboToolkit service already owns it) without affecting the direct path.
 If a firewall is enabled, the PC Service still needs the same LAN rules as the
 standard XRoboToolkit tutorial.
 

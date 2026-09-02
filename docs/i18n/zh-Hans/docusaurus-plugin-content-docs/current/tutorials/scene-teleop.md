@@ -74,8 +74,11 @@ SCENE_NO_VIDEO=1 bash scripts/run/start_scene_teleop.sh --scene cube
 直连 Remote Vision 由 PC 主动连接 Pico 的 TCP 12345。场景采用 SIMPLE 的
 ZEDMINI 媒体规格：先渲染单目 1280x720，再复制成并排的 2560x720 H.264
 流，帧率为 60 FPS。若只是诊断机器负载，可以传入 `--video-fps 30`，正常头显
-使用建议保留默认的 60 FPS。若启用防火墙，PC Service 仍需要与标准
-XRoboToolkit 教程相同的局域网规则。
+使用建议保留默认的 60 FPS。同时，场景发送器还会在 TCP 13579 上尽力运行一个
+旧版操作员控制监听器，让通过 `OPEN_CAMERA` 协商的旧头显固件仍能工作；旧版
+请求会在该次 Listen 会话剩余时间内替换直连目标。绑定 TCP 13579 可能失败
+（例如已有其他 XRoboToolkit 服务占用该端口），但不会影响直连路径。若启用
+防火墙，PC Service 仍需要与标准 XRoboToolkit 教程相同的局域网规则。
 
 视频流变为 live 后，转动头部即可观察模拟场景。场景运行时会把 **Head** 提供的 HMD
 姿态应用到 `scene_head_camera`；进程收到的第一份有效 HMD 姿态作为中立参考，之后只应用

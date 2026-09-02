@@ -114,7 +114,7 @@ def test_scene_video_transport_repeats_headers_and_emits_short_recovery_idr() ->
         packets: list[bytes] = []
         for index in range(16):
             frame = np.full((48, 64, 3), index * 7, dtype=np.uint8)
-            packets.extend(transport._encode(encoder, frame))
+            packets.extend(transport._encode(encoder, frame, width=128, height=48))
         # The first packet and the packet at the 15-frame recovery interval
         # both carry SPS/PPS (NAL types 7/8) before the IDR.  This mirrors
         # SIMPLE's insert-sps-pps=true, idrinterval=15 profile.
@@ -401,3 +401,180 @@ def test_scene_video_defaults_match_simple_zedmini_profile() -> None:
         720,
         60,
     )
+
+
+def _control_body(command: str, data: bytes = b"") -> bytes:
+    """Encode one NetworkDataProtocol message with 4-byte BE framing."""
+    command_bytes = command.encode("utf-8")
+    body = struct.pack("<i", len(command_bytes)) + command_bytes + struct.pack("<i", len(data)) + data
+    return struct.pack(">I", len(body)) + body
+
+
+def _read_control_frame(peer: socket.socket, timeout: float = 3.0) -> tuple[str, bytes]:
+    """Read one length-framed control message and return (command, data)."""
+    peer.settimeout(timeout)
+    (body_size,) = struct.unpack(">I", _recv_exact(peer, 4))
+    body = _recv_exact(peer, body_size)
+    (command_size,) = struct.unpack_from("<i", body, 0)
+    command = body[4 : 4 + command_size].decode("utf-8").rstrip("\x00")
+    (data_size,) = struct.unpack_from("<i", body, 4 + command_size)
+    data = body[4 + command_size + 4 : 4 + command_size + 4 + data_size]
+    return command, data
+
+
+def _camera_request_payload(
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    bitrate: int,
+    port: int,
+    camera: str = "ZEDMINI",
+    ip: str = "127.0.0.1",
+) -> bytes:
+    """Serialize a CameraRequestSerializer payload the way the headset does."""
+    payload = b"\xca\xfe\x01" + struct.pack("<7i", width, height, fps, bitrate, 0, 2, port)
+    for value in (camera, ip):
+        encoded = value.encode("utf-8")
+        payload += bytes([len(encoded)]) + encoded
+    return payload
+
+
+def _unreachable_direct_endpoint_transport(*, control_port: int) -> DirectXRoboToolkitVideoTransport:
+    # Port 1 on loopback refuses connections, so the direct probe never
+    # interferes with the legacy OPEN_CAMERA listener in these tests.
+    return DirectXRoboToolkitVideoTransport(
+        host="127.0.0.1",
+        port=1,
+        width=128,
+        height=48,
+        fps=30,
+        control_port=control_port,
+    )
+
+
+def test_scene_video_transport_legacy_open_camera_connects_and_acks() -> None:
+    """The legacy OPEN_CAMERA handshake must stream to the advertised listener."""
+    media_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    media_listener.bind(("127.0.0.1", 0))
+    media_listener.listen(1)
+    media_listener.settimeout(2.0)
+    media_port = int(media_listener.getsockname()[1])
+    transport = _unreachable_direct_endpoint_transport(control_port=0)
+    try:
+        transport.start()
+        control = socket.create_connection(("127.0.0.1", transport._control_port), timeout=2.0)
+        try:
+            control.sendall(
+                _control_body(
+                    "OPEN_CAMERA",
+                    _camera_request_payload(
+                        width=256, height=48, fps=30, bitrate=4_000_000, port=media_port
+                    ),
+                )
+            )
+            media_peer, _ = media_listener.accept()
+            try:
+                deadline = time.monotonic() + 2.0
+                while not transport.is_connected and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                assert transport.is_connected
+                transport.publish_frame(np.zeros((48, 128, 3), dtype=np.uint8))
+                (frame_size,) = struct.unpack(">I", _recv_exact(media_peer, 4))
+                assert frame_size > 0
+                assert _recv_exact(media_peer, frame_size)
+            finally:
+                media_peer.close()
+            command, _ = _read_control_frame(control)
+            assert command == "OPEN_CAMERA"
+        finally:
+            control.close()
+    finally:
+        transport.stop()
+        media_listener.close()
+
+
+def test_scene_video_transport_legacy_close_camera_acks_and_disconnects() -> None:
+    """CLOSE_CAMERA must be acknowledged and tear down the media socket."""
+    media_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    media_listener.bind(("127.0.0.1", 0))
+    media_listener.listen(1)
+    media_listener.settimeout(2.0)
+    media_port = int(media_listener.getsockname()[1])
+    transport = _unreachable_direct_endpoint_transport(control_port=0)
+    try:
+        transport.start()
+        control = socket.create_connection(("127.0.0.1", transport._control_port), timeout=2.0)
+        try:
+            control.sendall(
+                _control_body(
+                    "OPEN_CAMERA",
+                    _camera_request_payload(
+                        width=256, height=48, fps=30, bitrate=4_000_000, port=media_port
+                    ),
+                )
+            )
+            media_peer, _ = media_listener.accept()
+            command, _ = _read_control_frame(control)
+            assert command == "OPEN_CAMERA"
+            media_peer.close()
+            control.sendall(_control_body("CLOSE_CAMERA"))
+            command, _ = _read_control_frame(control)
+            assert command == "CLOSE_CAMERA"
+            deadline = time.monotonic() + 1.0
+            while transport.is_connected and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert not transport.is_connected
+        finally:
+            control.close()
+    finally:
+        transport.stop()
+        media_listener.close()
+
+
+def test_scene_video_transport_legacy_malformed_open_camera_closes_control() -> None:
+    """A malformed OPEN_CAMERA must not wedge the control connection."""
+    transport = _unreachable_direct_endpoint_transport(control_port=0)
+    try:
+        transport.start()
+        control = socket.create_connection(("127.0.0.1", transport._control_port), timeout=2.0)
+        try:
+            control.sendall(_control_body("OPEN_CAMERA", b"\x00\x01\x02"))
+            control.settimeout(2.0)
+            with pytest.raises(ConnectionError):
+                _read_control_frame(control)
+        finally:
+            control.close()
+    finally:
+        transport.stop()
+
+
+def test_scene_video_transport_legacy_control_sends_keepalive_ping() -> None:
+    """The control connection must emit a PING keepalive to hold the session."""
+    transport = _unreachable_direct_endpoint_transport(control_port=0)
+    try:
+        transport.start()
+        control = socket.create_connection(("127.0.0.1", transport._control_port), timeout=2.0)
+        try:
+            command, _ = _read_control_frame(control, timeout=5.0)
+            assert command == "PING"
+        finally:
+            control.close()
+    finally:
+        transport.stop()
+
+
+def test_scene_video_transport_legacy_pong_replies_to_ping() -> None:
+    """A headset PING must be answered with PONG on the control connection."""
+    transport = _unreachable_direct_endpoint_transport(control_port=0)
+    try:
+        transport.start()
+        control = socket.create_connection(("127.0.0.1", transport._control_port), timeout=2.0)
+        try:
+            control.sendall(_control_body("PING"))
+            command, _ = _read_control_frame(control)
+            assert command == "PONG"
+        finally:
+            control.close()
+    finally:
+        transport.stop()
