@@ -225,7 +225,11 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         )
         if not bool(result.success.item()):
             raise RuntimeError(f"CuRobo failed to plan segment: {result.status}")
-        end = int(result.path_buffer_last_tstep.item())
+        last_tstep = result.path_buffer_last_tstep
+        if hasattr(last_tstep, "item"):
+            end = int(last_tstep.item())
+        else:
+            end = int(np.asarray(last_tstep).reshape(-1)[0])
         position = result.interpolated_plan.trim_trajectory(0, end).position
         if position.ndim == 3:
             position = position[0]
