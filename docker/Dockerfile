@@ -40,7 +40,12 @@ RUN git clone --filter=blob:none https://github.com/NVlabs/curobo.git /opt/curob
     git -C /opt/curobo checkout --detach "${CUROBO_REVISION}" && \
     python3.10 -m pip install --no-cache-dir \
       "torch==${TORCH_VERSION}" --index-url "https://download.pytorch.org/whl/${TORCH_INDEX_CUDA}" && \
-    python3.10 -m pip install --no-cache-dir --no-build-isolation -e /opt/curobo
+    # Build a regular wheel: this pinned commit has no release tag and its
+    # editable metadata path is incompatible with modern setuptools_scm.
+    python3.10 -m pip wheel --no-cache-dir --no-build-isolation --no-deps \
+      -w /tmp/curobo-wheel /opt/curobo && \
+    python3.10 -m pip install --no-cache-dir /tmp/curobo-wheel/*.whl && \
+    rm -rf /tmp/curobo-wheel
 
 COPY pyproject.toml README.md LICENSE /opt/mujocoteleoplab/
 COPY teleopit /opt/mujocoteleoplab/teleopit
