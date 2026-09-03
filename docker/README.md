@@ -57,6 +57,19 @@ docker compose -f docker/compose.yml run --rm mujoco-teleoplab vla \
   --scene can --episodes 1 --output-dir outputs/vla_scene_data_curobo
 ```
 
+重放并验收已采集的 episode（同时生成 JPEG 帧和 MP4）：
+
+```bash
+docker compose -f docker/compose.yml run --rm mujoco-teleoplab replay \
+  --scene can \
+  --episode outputs/vla_scene_data_curobo/episode_000000.npz \
+  --render-dir outputs/vla_scene_replays/episode_000000
+```
+
+重放报告会写入 `replay_report.json`，包含状态最大误差、物体位姿误差、
+物体位移和独立 `success` 判断。命令在 success 或状态重放不匹配时返回非零，
+可直接用于批量筛选数据。
+
 容器会把当前仓库挂载到 `/workspace`，所以生成的数据和下载的资产仍保存在主机
 目录中，并继续遵守 Git 忽略规则。
 

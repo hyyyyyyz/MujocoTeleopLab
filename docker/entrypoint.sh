@@ -29,6 +29,10 @@ PY
     shift || true
     exec python3.10 scripts/run/generate_vla_scene_data.py --planner curobo "$@"
     ;;
+  replay)
+    shift || true
+    exec .venv_scene/bin/python scripts/run/replay_vla_scene_data.py "$@"
+    ;;
   scene)
     shift || true
     exec python3.10 scripts/run/run_scene_teleop.py "$@"

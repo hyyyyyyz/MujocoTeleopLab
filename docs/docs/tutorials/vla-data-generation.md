@@ -33,5 +33,22 @@ NPZ per episode and an image directory per episode. `success` is currently the
 object-displacement predicate (at least 1 cm). Discard failed episodes before
 training or conversion.
 
+## Replay and validation
+
+采集后建议先离线重放，确认动作确实能在同一场景中复现，并检查状态是否
+与记录一致：
+
+```bash
+.venv_scene/bin/python scripts/run/replay_vla_scene_data.py \
+  --scene can \
+  --episode outputs/vla_scene_data_curobo/episode_000000.npz \
+  --render-dir outputs/vla_scene_replays/episode_000000
+```
+
+工具从场景初始状态重新执行 43-D action，输出 JPEG 帧、`replay.mp4` 和
+`replay_report.json`。报告包含状态最大绝对误差、RMSE、物体位姿误差和
+物体位移；命令仅在 `success` 且状态误差不超过 `--state-tolerance` 时返回
+零退出码，可用于批量过滤无效 episode。
+
 The planner is a replaceable interface. `CuroboSceneTrajectoryPlanner` is the
 production backend; `ScriptedPickPlacePlanner` exists only for plumbing tests.
