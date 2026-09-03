@@ -12,6 +12,8 @@ services:
         CUROBO_REVISION: ${CUROBO_REVISION:-a56e0f06db9efb99232586db18b18b323cb22c47}
         TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
         TORCH_INDEX_CUDA: ${TORCH_INDEX_CUDA:-cu128}
+        BUILD_DNS_1: ${BUILD_DNS_1:-10.0.26.18}
+        BUILD_DNS_2: ${BUILD_DNS_2:-10.0.26.19}
     image: mujoco-teleoplab:cuda
     working_dir: /workspace
     volumes:

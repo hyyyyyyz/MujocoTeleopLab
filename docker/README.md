@@ -41,6 +41,9 @@ DOCKER_BUILDKIT=1 docker build --network=host \
   -t mujoco-teleoplab:cuda -f docker/Dockerfile .
 ```
 
+Dockerfile 默认使用当前服务器的 DNS `10.0.26.18` 和 `10.0.26.19`；在其他网络
+环境可覆盖 `BUILD_DNS_1`、`BUILD_DNS_2` 两个构建参数。
+
 ## 自动 VLA 数据生成
 
 CuRobo 规划不依赖 PICO，可直接在服务器上运行：
