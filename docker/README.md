@@ -33,8 +33,13 @@ docker compose -f docker/compose.yml run --rm mujoco-teleoplab check
 构建时会固定安装 CuRobo revision 和 CUDA PyTorch（默认 CUDA 12.8 / PyTorch 2.7.1）。首次构建需要下载较大的 CUDA、
 PyTorch 和 CuRobo 层，建议预留至少 20 GB 磁盘空间。
 
-Compose 构建阶段使用 host 网络，以兼容部分 GPU 服务器上 Docker bridge
-网络的 DNS 限制。
+Compose 构建配置声明使用 host 网络；如果 Docker Compose/Buildx 版本仍未将
+该设置传递给构建器，可使用下面的等价命令：
+
+```bash
+DOCKER_BUILDKIT=1 docker build --network=host \
+  -t mujoco-teleoplab:cuda -f docker/Dockerfile .
+```
 
 ## 自动 VLA 数据生成
 
