@@ -65,10 +65,13 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
     ) -> None:
         try:
             import torch
-            # Recent warp wheels keep the PyTorch bridge in a lazy submodule;
-            # CuRobo accesses it as ``wp.torch`` during collision-checker
-            # construction, so load it explicitly before MotionGen setup.
-            import warp.torch  # noqa: F401
+            # CuRobo releases before Warp 1.17 access the bridge as
+            # ``wp.torch.device_from_torch``.  Warp 1.17 exposes these
+            # functions at the top level instead, so provide the compatible
+            # module alias before MotionGen constructs its collision checker.
+            import warp as _warp
+            if not hasattr(_warp, "torch"):
+                _warp.torch = _warp
             from curobo.geom.types import Cuboid, WorldConfig
             from curobo.types.base import TensorDeviceType
             from curobo.types.math import Pose
