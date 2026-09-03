@@ -48,10 +48,11 @@ RUN git clone --filter=blob:none https://github.com/NVlabs/curobo.git /opt/curob
 # intermittently reset by restricted server networks.  Download the canonical
 # URL directly with curl retries, then install the local wheel.
 RUN curl -fL --retry 8 --retry-delay 5 --retry-all-errors --connect-timeout 30 \
-      -o /tmp/torch.whl \
+      -o "/tmp/torch-${TORCH_VERSION}+${TORCH_INDEX_CUDA}-cp310-cp310-manylinux_2_28_x86_64.whl" \
       "https://download.pytorch.org/whl/${TORCH_INDEX_CUDA}/torch-${TORCH_VERSION}%2B${TORCH_INDEX_CUDA}-cp310-cp310-manylinux_2_28_x86_64.whl" && \
-    python3.10 -m pip install --no-cache-dir /tmp/torch.whl && \
-    rm -f /tmp/torch.whl
+    python3.10 -m pip install --no-cache-dir \
+      "/tmp/torch-${TORCH_VERSION}+${TORCH_INDEX_CUDA}-cp310-cp310-manylinux_2_28_x86_64.whl" && \
+    rm -f "/tmp/torch-${TORCH_VERSION}+${TORCH_INDEX_CUDA}-cp310-cp310-manylinux_2_28_x86_64.whl"
 
 # Build a regular wheel: this pinned commit has no release tag and its
 # editable metadata path is incompatible with modern setuptools_scm.
