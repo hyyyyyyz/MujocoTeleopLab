@@ -1,7 +1,9 @@
 # CUDA-enabled runtime for MujocoTeleopLab on NVIDIA GPUs (including RTX 5090).
 # The host NVIDIA driver is supplied by nvidia-container-toolkit; it is not
 # installed in the image.
-FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+# NGC is used instead of Docker Hub because many secured GPU servers allow
+# access to nvcr.io while registry-1.docker.io is rate-limited or blocked.
+FROM nvcr.io/nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUROBO_REVISION=a56e0f06db9efb99232586db18b18b323cb22c47

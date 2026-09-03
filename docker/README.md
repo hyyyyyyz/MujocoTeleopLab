@@ -6,16 +6,18 @@
 
 ## 主机准备
 
-在服务器上确认驱动和 Docker 已就绪：
+在服务器上确认驱动、Docker 和 NGC 网络访问已就绪：
 
 ```bash
 nvidia-smi
 docker --version
 docker compose version
-docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+docker run --rm --gpus all --entrypoint nvidia-smi \
+  nvcr.io/nvidia/cuda:12.8.1-base-ubuntu22.04
 ```
 
-如果最后一条失败，先安装/配置 `nvidia-container-toolkit`，不要继续构建项目镜像。
+如果最后一条失败，先安装/配置 `nvidia-container-toolkit` 或检查 NGC 网络，
+不要继续构建项目镜像。
 RTX 5090 的驱动版本应使用 NVIDIA 官方当前支持 Blackwell 的版本（建议 570 或更新）；CUDA 镜像的
 用户态版本不要求与驱动版本完全相同，但驱动必须满足其最低兼容版本。
 
