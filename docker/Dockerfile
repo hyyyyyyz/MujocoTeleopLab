@@ -9,8 +9,6 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG CUROBO_REVISION=a56e0f06db9efb99232586db18b18b323cb22c47
 ARG TORCH_VERSION=2.7.1
 ARG TORCH_INDEX_CUDA=cu128
-ARG BUILD_DNS_1=10.0.26.18
-ARG BUILD_DNS_2=10.0.26.19
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -20,8 +18,7 @@ ENV LANG=C.UTF-8 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
 
-RUN printf 'nameserver %s\nnameserver %s\n' "${BUILD_DNS_1}" "${BUILD_DNS_2}" > /etc/resolv.conf && \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
       python3.10 python3.10-dev python3-pip python3-venv \
       build-essential git curl ca-certificates pkg-config \
       libglfw3 libgl1 libegl1 libgles2 libosmesa6 libx11-6 libxext6 \

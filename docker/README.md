@@ -41,8 +41,8 @@ DOCKER_BUILDKIT=1 docker build --network=host \
   -t mujoco-teleoplab:cuda -f docker/Dockerfile .
 ```
 
-Dockerfile 默认使用当前服务器的 DNS `10.0.26.18` 和 `10.0.26.19`；在其他网络
-环境可覆盖 `BUILD_DNS_1`、`BUILD_DNS_2` 两个构建参数。
+在 DNS 受限的服务器上，可给构建命令增加 `--add-host`，将 apt 源解析到服务器
+已验证的地址；这些地址应按服务器实际 DNS 解析结果更新。
 
 ## 自动 VLA 数据生成
 
