@@ -56,7 +56,14 @@ if (( ${#missing_dwbc_files[@]} > 0 )); then
 fi
 
 if [[ ! -x "$scene_venv/bin/python" ]]; then
-  uv venv --python 3.10 "$scene_venv"
+  venv_args=(--python 3.10)
+  # CUDA Docker images keep the pinned torch/CuRobo installation in the
+  # image's system interpreter.  Inherit those packages into the scene venv
+  # instead of downloading a second (possibly CPU-only) torch wheel.
+  if [[ "${SCENE_TORCH_PREINSTALLED:-0}" == "1" ]]; then
+    venv_args+=(--system-site-packages)
+  fi
+  uv venv "${venv_args[@]}" "$scene_venv"
 fi
 scene_python_version="$("$scene_venv/bin/python" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 if [[ "$scene_python_version" != "3.10" ]]; then
@@ -64,10 +71,19 @@ if [[ "$scene_python_version" != "3.10" ]]; then
   echo "Remove that environment deliberately and rerun this setup script, or choose a different path." >&2
   exit 1
 fi
-uv pip install --python "$scene_venv/bin/python" \
-  'numpy==1.26.4' 'scipy==1.15.3' 'mujoco==3.3.4' \
-  onnxruntime torch pin pin-pink 'qpsolvers[osqp]' gymnasium \
+scene_packages=(
+  'numpy==1.26.4' 'scipy==1.15.3' 'mujoco==3.3.4'
+  onnxruntime pin pin-pink 'qpsolvers[osqp]' gymnasium
   pyyaml meshcat meshcat-shapes av
+)
+# The CUDA image already contains a pinned PyTorch/CuRobo pair.  Re-resolving
+# ``torch`` from the default index here can silently replace it with a CPU or
+# incompatible wheel, so Docker sets this opt-out explicitly.  Native setup
+# keeps the historical behavior and installs torch as before.
+if [[ "${SCENE_TORCH_PREINSTALLED:-0}" != "1" ]]; then
+  scene_packages+=(torch)
+fi
+uv pip install --python "$scene_venv/bin/python" "${scene_packages[@]}"
 uv pip install --python "$scene_venv/bin/python" --no-deps -e "$dwbc_root"
 
 # Check the import surface used by the scene launcher immediately after the

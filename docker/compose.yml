@@ -1,0 +1,32 @@
+name: mujoco-teleoplab
+
+services:
+  mujoco-teleoplab:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        CUROBO_REVISION: ${CUROBO_REVISION:-a56e0f06db9efb99232586db18b18b323cb22c47}
+        TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
+        TORCH_INDEX_CUDA: ${TORCH_INDEX_CUDA:-cu128}
+    image: mujoco-teleoplab:cuda
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+      - ${HOME}/.cache/pip:/root/.cache/pip
+      - ${HOME}/.cache/torch:/root/.cache/torch
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      MUJOCO_GL: ${MUJOCO_GL:-egl}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,graphics,display}
+      PYTHONPATH: /workspace
+      SCENE_TORCH_PREINSTALLED: ${SCENE_TORCH_PREINSTALLED:-1}
+    gpus: all
+    ipc: host
+    shm_size: 2gb
+    network_mode: host
+    stdin_open: true
+    tty: true
+    init: true

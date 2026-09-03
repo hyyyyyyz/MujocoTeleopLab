@@ -106,6 +106,11 @@ license status, task semantics, and directory rules for scenes and objects.
 The catalog does not redistribute third-party meshes or XML; validate it with
 `./.venv/bin/python scripts/dev/validate_asset_manifests.py`.
 
+For a reproducible CUDA-isolated environment on an NVIDIA server (including
+RTX 5090), use the files in [`docker/`](docker/README.md). The image pins the
+CUDA PyTorch/CuRobo stack and the Compose service mounts this repository at
+`/workspace`, so downloaded assets and generated datasets remain on the host.
+
 ## Documentation
 
 The local documentation covers installation profiles, PICO/XRoboToolkit scene
