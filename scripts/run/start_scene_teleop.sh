@@ -430,6 +430,12 @@ scene_threads="${SCENE_NUM_THREADS:-1}"
 # configurable for machines where a larger pool benchmarks better.
 scene_env=(
   env
+  # Keep the Remote Vision offscreen renderer on EGL.  With the default GLFW
+  # backend, MuJoCo's Renderer and the onscreen viewer create GLFW contexts
+  # from different threads; Wayland/GLFW can then abort in
+  # _glfwPlatformCreateMutex.  The viewer still uses GLFW independently, while
+  # EGL handles the camera renderer safely in its worker thread.
+  "MUJOCO_GL=${SCENE_MUJOCO_GL:-egl}"
   "OMP_NUM_THREADS=${SCENE_OMP_NUM_THREADS:-$scene_threads}"
   "MKL_NUM_THREADS=${SCENE_MKL_NUM_THREADS:-$scene_threads}"
   "OPENBLAS_NUM_THREADS=${SCENE_OPENBLAS_NUM_THREADS:-$scene_threads}"

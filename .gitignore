@@ -99,6 +99,9 @@ teleopit/retargeting/gmr/assets/
 # Canonical robot XML/meshes (downloaded from ModelScope)
 assets/robots/
 
+# Optional third-party tabletop objects (downloaded from their source repos)
+assets/objects/
+
 # Legacy training-side robot assets are no longer tracked.
 train_mimic/assets/
 

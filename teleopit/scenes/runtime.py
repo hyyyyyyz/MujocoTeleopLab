@@ -19,6 +19,9 @@ _SCENE_NAMES = {
     "cube": "pnp_cube_43dof.xml",
     "bottle": "pnp_bottle_43dof.xml",
     "box": "lift_box_43dof.xml",
+    "robosuite-can": "outputs/scenes/robosuite_can_43dof.xml",
+    "robosuite-lemon": "outputs/scenes/robosuite_lemon_43dof.xml",
+    "robosuite-bottle": "outputs/scenes/robosuite_bottle_43dof.xml",
 }
 
 _logger = logging.getLogger(__name__)
@@ -83,7 +86,10 @@ def scene_xml_path(scene: str) -> Path:
         supported = ", ".join(sorted(_SCENE_NAMES))
         raise ValueError(f"Unknown scene '{scene}'. Supported scenes: {supported}") from exc
     root = Path(__file__).resolve().parents[2]
-    path = root / "third_party" / "decoupled_wbc" / "control" / "robot_model" / "model_data" / "g1" / filename
+    if filename.startswith("outputs/"):
+        path = root / filename
+    else:
+        path = root / "third_party" / "decoupled_wbc" / "control" / "robot_model" / "model_data" / "g1" / filename
     if not path.is_file():
         raise FileNotFoundError(
             f"Scene asset is missing: {path}. Initialize third_party/decoupled_wbc before running scene teleop."
@@ -981,7 +987,9 @@ class SceneTeleopRuntime:
                             f"{packet_rate:.1f} Hz, age={receiver.age_s() or 0.0:.3f}s, "
                             f"Menu={current_packet.left_menu}, "
                             f"L/R trigger={current_packet.left_trigger:.2f}/{current_packet.right_trigger:.2f}, "
-                            f"active={controller.active}."
+                            f"L/R axis={current_packet.left_axis[0]:.2f},{current_packet.left_axis[1]:.2f}/"
+                            f"{current_packet.right_axis[0]:.2f},{current_packet.right_axis[1]:.2f}, "
+                            f"active={controller.active}, locomotion={controller.locomotion_enabled}."
                         )
                     last_input_status_s = now
                     last_input_packet_count = current_count

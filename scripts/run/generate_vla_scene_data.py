@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Generate image-language-action demonstrations for a 43-DOF scene.
+
+The default CuRobo planner runs entirely in MuJoCo and requires a CUDA CuRobo
+installation, but does not require PICO/XRoboToolkit. Heavy scene assets stay outside Git; the output directory
+is also ignored.  The resulting layout is intentionally simple and editable:
+
+    episode_000000.npz  (state, action, object_pose, timestamps)
+    episode_000000/000000.jpg ...
+    episodes.jsonl       (language/task metadata and success flag)
+    schema.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+import time
+
+import numpy as np
+from PIL import Image
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from teleopit.scenes.controller import SimpleSceneController
+from teleopit.scenes.runtime import SceneTeleopRuntime, scene_xml_path
+from teleopit.scenes.vla_datagen import (
+    CuroboSceneTrajectoryPlanner,
+    JointWaypoint,
+    ScriptedPickPlacePlanner,
+    WristWaypoint,
+    interpolate_waypoints,
+)
+from teleopit.scenes.xr_packet import SceneXRPacket
+
+
+def _packet(sequence: int, timestamp_s: float, pose: np.ndarray, trigger: float, grip: float, *, left_menu: bool = False) -> SceneXRPacket:
+    values = {
+        "sequence": sequence,
+        "timestamp_s": timestamp_s,
+        "left_pose": [-0.2, 0.0, -0.3, 0.0, 0.0, 0.0, 1.0],
+        "right_pose": pose.tolist(),
+        "head_pose": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+        "left_axis": [0.0, 0.0],
+        "right_axis": [0.0, 0.0],
+        "left_trigger": 0.0,
+        "right_trigger": trigger,
+        "left_grip": 0.0,
+        "right_grip": grip,
+        "a": False,
+        "b": False,
+        "x": False,
+        "y": False,
+        "left_menu": left_menu,
+    }
+    return SceneXRPacket.from_mapping(values)
+
+
+def _object_pose(runtime: SceneTeleopRuntime, object_name: str) -> np.ndarray:
+    mujoco = runtime._mujoco
+    joint_name = "cube_joint" if object_name == "cube" else f"robosuite_{object_name}_free"
+    joint_id = mujoco.mj_name2id(runtime.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+    if joint_id < 0:
+        raise ValueError(f"scene is missing object free joint {joint_name!r}")
+    address = int(runtime.model.jnt_qposadr[joint_id])
+    return np.asarray(runtime.data.qpos[address : address + 7], dtype=np.float32).copy()
+
+
+def _capture(renderer: object, runtime: SceneTeleopRuntime) -> np.ndarray:
+    renderer.update_scene(runtime.data, camera="scene_head_camera")
+    return np.asarray(renderer.render(), dtype=np.uint8).copy()
+
+
+def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float) -> bool:
+    runtime.reset()
+    controller = SimpleSceneController()
+    waypoints = planner.plan(object_name=object_name, episode_index=episode_index, runtime=runtime) if isinstance(planner, CuroboSceneTrajectoryPlanner) else planner.plan(object_name=object_name, episode_index=episode_index)
+    if not waypoints:
+        raise RuntimeError("planner returned an empty trajectory")
+    # Enter arm mode using the same SIMPLE chord as the PICO bridge.
+    first_pose = waypoints[0].pose if isinstance(waypoints[0], WristWaypoint) else waypoints[0].wrist_pose
+    activation = controller.update(_packet(1, 0.0, np.asarray(first_pose), 1.0, 0.0, left_menu=True))
+    if not activation.activation_toggled:
+        raise RuntimeError("failed to activate scripted scene teleoperation")
+    if isinstance(waypoints[0], WristWaypoint):
+        runtime._start_teleoperation(activation)
+
+    renderer = None
+    try:
+        import mujoco
+
+        renderer = mujoco.Renderer(runtime.model, height=224, width=224)
+    except Exception as exc:
+        raise RuntimeError("MuJoCo offscreen renderer is required for VLA image capture") from exc
+
+    states: list[np.ndarray] = []
+    actions: list[np.ndarray] = []
+    objects: list[np.ndarray] = []
+    timestamps: list[float] = []
+    image_dir = output_dir / f"episode_{episode_index:06d}"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    sequence = 2
+    timestamp = 1.0 / hz
+    if isinstance(waypoints[0], WristWaypoint):
+        samples = ((pose, trigger, grip, None) for pose, trigger, grip in interpolate_waypoints(waypoints, hz=hz))
+    else:
+        samples = ((np.asarray(item.wrist_pose, dtype=np.float64), item.trigger, item.grip, item) for item in waypoints)
+    for frame, (pose, trigger, grip, joint_waypoint) in enumerate(samples):
+        packet = _packet(sequence, timestamp, pose, trigger, grip)
+        command = controller.update(packet)
+        if isinstance(joint_waypoint, JointWaypoint):
+            runtime._target_by_joint.update(joint_waypoint.positions)
+        else:
+            runtime.update_policy(command, active=True)
+        for _ in range(runtime._control_decimation):
+            runtime._apply_pd()
+            runtime._mujoco.mj_step(runtime.model, runtime.data)
+        state = np.array([runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names], dtype=np.float32)
+        action = np.array([runtime._target_by_joint[name] for name in runtime._actuator_names], dtype=np.float32)
+        states.append(state)
+        actions.append(action)
+        objects.append(_object_pose(runtime, object_name))
+        timestamps.append(timestamp)
+        if frame % max(1, image_stride) == 0:
+            frame_rgb = _capture(renderer, runtime)
+            Image.fromarray(frame_rgb).save(image_dir / f"{frame:06d}.jpg", quality=85)
+        sequence += 1
+        timestamp += 1.0 / hz
+    renderer.close()
+
+    object_delta = float(np.linalg.norm(objects[-1][:3] - objects[0][:3]))
+    success = object_delta >= 0.01
+    np.savez_compressed(
+        output_dir / f"episode_{episode_index:06d}.npz",
+        observation_state=np.asarray(states, dtype=np.float32),
+        action=np.asarray(actions, dtype=np.float32),
+        object_pose=np.asarray(objects, dtype=np.float32),
+        timestamp_s=np.asarray(timestamps, dtype=np.float64),
+    )
+    return success
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scene", choices=("cube", "bottle", "can", "lemon"), default="can")
+    parser.add_argument("--scene-xml", type=Path)
+    parser.add_argument("--episodes", type=int, default=1)
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs/vla_scene_data"))
+    parser.add_argument("--hz", type=float, default=50.0)
+    parser.add_argument("--image-stride", type=int, default=5)
+    parser.add_argument(
+        "--planner",
+        choices=("curobo", "scripted"),
+        default="curobo",
+        help="Planning backend. 'curobo' is the collision-aware production path; 'scripted' is only a plumbing smoke test.",
+    )
+    args = parser.parse_args(argv)
+    if args.episodes <= 0 or args.hz <= 0 or args.image_stride <= 0:
+        parser.error("episodes, hz and image-stride must be positive")
+    if args.scene == "cube":
+        object_name = "cube"
+        xml = args.scene_xml.resolve() if args.scene_xml else scene_xml_path("cube")
+    else:
+        object_name = args.scene
+        xml = args.scene_xml.resolve() if args.scene_xml else scene_xml_path(f"robosuite-{args.scene}")
+    output_dir = (PROJECT_ROOT / args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    schema = {
+        "format": "teleopit_scene_vla_v1",
+        "scene": args.scene,
+        "fps": args.hz,
+        "state_shape": [43],
+        "action_shape": [43],
+        "image_size": [224, 224],
+        "language_field": "task",
+    }
+    (output_dir / "schema.json").write_text(json.dumps(schema, indent=2) + "\n", encoding="utf-8")
+    episodes_path = output_dir / "episodes.jsonl"
+    runtime = SceneTeleopRuntime(scene_xml=xml, input_timeout_s=1.0)
+    if args.planner == "curobo":
+        from teleopit.scenes.vla_datagen import CuroboSceneTrajectoryPlanner
+
+        urdf = PROJECT_ROOT / "third_party/decoupled_wbc/control/robot_model/model_data/g1/g1_29dof_with_hand.urdf"
+        planner = CuroboSceneTrajectoryPlanner(runtime, urdf_path=str(urdf))
+    else:
+        planner = ScriptedPickPlacePlanner()
+    with episodes_path.open("w", encoding="utf-8") as stream:
+        for index in range(args.episodes):
+            started = time.time()
+            success = generate_planned_episode(runtime, planner=planner, object_name=object_name, episode_index=index, output_dir=output_dir, image_stride=args.image_stride, hz=args.hz)
+            stream.write(json.dumps({
+                "episode_index": index,
+                "scene": args.scene,
+                "task": f"pick up the {args.scene} and place it to the right",
+                "success": success,
+                "duration_s": round(time.time() - started, 3),
+                "data": f"episode_{index:06d}.npz",
+                "images": f"episode_{index:06d}",
+            }) + "\n")
+    print(f"Generated {args.episodes} VLA episode(s) under {output_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

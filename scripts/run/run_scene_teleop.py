@@ -64,7 +64,7 @@ def _host(value: str) -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SIMPLE-style Pico/XRoboToolkit G1 scene teleoperation")
-    parser.add_argument("--scene", choices=("cube", "bottle", "box"), default="cube")
+    parser.add_argument("--scene", choices=("cube", "bottle", "box", "robosuite-bottle", "robosuite-can", "robosuite-lemon"), default="cube")
     parser.add_argument("--scene-xml", type=Path, help="Custom 43-DOF MuJoCo scene XML")
     parser.add_argument("--bridge-host", type=_host, default=DEFAULT_XR_BRIDGE_HOST)
     parser.add_argument("--bridge-port", type=_port, default=DEFAULT_XR_BRIDGE_PORT)

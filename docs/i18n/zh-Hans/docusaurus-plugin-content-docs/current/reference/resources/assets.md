@@ -15,6 +15,38 @@ Teleopit 的 Git 仓库只保存代码，不保存大型机器人 mesh、运控�
 - `data/`、`ckpt/`、checkpoint、缓存等生成产物
 - 演示媒体（`assets/demo.gif`、`assets/demo.mp4`）
 
+## 场景与物体目录
+
+[`assets/manifests/`](../../../../assets/manifests/README.md) 中的轻量清单是仿真场景和物体
+元数据的唯一来源。它记录稳定 ID、上游 URL 和版本、下载后的本地路径、任务语义、许可证/
+再分发状态，以及（已知时）SHA256 校验值。它不会把第三方 XML、mesh、纹理或策略文件复制进 Git。
+
+当前 `cube`、`bottle` 和 `box` 场景来自独立场景运行时使用的
+`songlin/decoupled_wbc` checkout。该 checkout 中没有确认的许可证，因此清单将这些条目标记为
+`UNKNOWN`，在上游作者提供兼容许可证和声明之前禁止再分发。这是合规保护措施，并不表示上游项目
+一定没有许可证。
+
+可选的 robosuite 桌面物体适配器提供 `robosuite-bottle`、`robosuite-can` 和
+`robosuite-lemon` 三个场景别名。安装物体并生成被忽略的 43-DOF 场景：
+
+```bash
+.venv/bin/python scripts/setup/download_scene_object.py can
+.venv_scene/bin/python scripts/setup/build_scene_with_object.py can
+.venv_scene/bin/python scripts/run/run_scene_teleop.py --scene robosuite-can
+```
+
+在干净 checkout 中验证元数据：
+
+```bash
+.venv/bin/python scripts/dev/validate_asset_manifests.py
+```
+
+下载相关文件后，再验证本地路径：
+
+```bash
+.venv/bin/python scripts/dev/validate_asset_manifests.py --check-files
+```
+
 ## 资源清单
 
 | 资源组 | 下载后的路径 | 用途 |

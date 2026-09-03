@@ -88,6 +88,7 @@ teleopit/                 # Core inference package
 │   └── neck/             # Optional OpenNeck active-vision gimbal control
 ├── high_level_policy/    # Host-policy protocol, strict client, frame transform, and action scheduler
 └── recording/            # Pico motion NPZ recording helpers
+assets/manifests/          # Lightweight scene/object/robot provenance catalog
 scripts/
 ├── run/run_sim.py        # Offline sim2sim pipeline
 ├── run/run_sim2real.py   # G1 sim2real control; supports offline BVH playback and Pico4
@@ -314,6 +315,9 @@ python train_mimic/scripts/save_onnx.py --checkpoint logs/rsl_rl/g1_general_trac
 
 ### External Assets
 - Do not commit robot meshes, datasets, checkpoints, or demo media to Git; use `scripts/setup/download_assets.py`
+- Scene and object assets follow `assets/manifests/`: commit metadata, provenance, revision, SPDX status, task semantics, and SHA256 when known; keep heavy XML/mesh files in ignored/downloaded directories
+- Treat an upstream asset with an unknown license as non-redistributable until its license and notice are verified; do not copy it into this repository merely because a manifest references it
+- Validate metadata on every checkout with `.venv/bin/python scripts/dev/validate_asset_manifests.py`; use `--check-files` only after downloading the referenced assets
 - G1 XML variants and their meshes are downloaded under `assets/robots/unitree_g1/` by the `robots` asset group and are not tracked in Git; `g1_29dof.xml` is the default
 - The neck-and-O6 runtime variant is `assets/robots/unitree_g1/g1_29dof_neck_o6.xml`
 - Released tracking assets download under `ckpt/` as the matching `track_g1.{pt,onnx}` and `track_g1_neck_o6.{pt,onnx}` pairs

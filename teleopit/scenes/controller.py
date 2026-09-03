@@ -101,6 +101,11 @@ class SimpleSceneController:
     def active(self) -> bool:
         return self._active
 
+    @property
+    def locomotion_enabled(self) -> bool:
+        """Whether joystick navigation is currently unlocked."""
+        return self._locomotion_enabled
+
     def reset(self, *, packet: SceneXRPacket | None = None) -> None:
         """Reset the scene mode state.
 

@@ -79,6 +79,12 @@ This path is intentionally separate from the 29-DOF whole-body tracker. See
 the [XRoboToolkit scene teleoperation tutorial](docs/docs/tutorials/scene-teleop.md)
 for setup, controller mapping, and custom-scene requirements.
 
+Simulation assets are cataloged separately from code. See
+[`assets/manifests/`](assets/manifests/README.md) for the provenance,
+license status, task semantics, and directory rules for scenes and objects.
+The catalog does not redistribute third-party meshes or XML; validate it with
+`./.venv/bin/python scripts/dev/validate_asset_manifests.py`.
+
 ## Documentation
 
 Full docs at **[BotRunner64.github.io/Teleopit](https://BotRunner64.github.io/Teleopit/)**, covering installation profiles, all tutorials, configuration reference, and architecture.

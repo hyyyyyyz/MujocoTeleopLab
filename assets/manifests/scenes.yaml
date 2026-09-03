@@ -1,0 +1,159 @@
+schema_version: 1
+kind: scenes
+description: >-
+  Lightweight catalog for MuJoCo scene entry points. The runtime aliases stay
+  compatible with the existing --scene CLI while the XML remains a downloaded
+  asset.
+assets:
+  - id: tabletop.pick-and-place.cube.v1
+    display_name: Tabletop pick and place — cube
+    version: 1
+    runtime:
+      type: xrobotoolkit_scene_teleop
+      alias: cube
+      actuators: 43
+      xml: third_party/decoupled_wbc/control/robot_model/model_data/g1/pnp_cube_43dof.xml
+    objects: [tabletop.cube.v1]
+    task:
+      type: pick_and_place
+      reset: both_side_grips
+      success: object_displacement
+    source:
+      type: git
+      uri: https://github.com/songlin/decoupled_wbc
+      revision: 5b304e4d643fe89cd000068dcbba7e7519539caa
+    integrity:
+      sha256: ffa071690f4cd3db2ecc55f34edbbf2d3d9c0054c2e784598b572c1f0ed37c3f
+    license:
+      spdx: UNKNOWN
+      notice_file: null
+      redistribution: prohibited_until_upstream_license_review
+    tracked: false
+
+  - id: tabletop.pick-and-place.bottle.v1
+    display_name: Tabletop pick and place — bottle
+    version: 1
+    runtime:
+      type: xrobotoolkit_scene_teleop
+      alias: bottle
+      actuators: 43
+      xml: third_party/decoupled_wbc/control/robot_model/model_data/g1/pnp_bottle_43dof.xml
+    objects: [tabletop.bottle.v1]
+    task:
+      type: pick_and_place
+      reset: both_side_grips
+      success: object_displacement
+    source:
+      type: git
+      uri: https://github.com/songlin/decoupled_wbc
+      revision: 5b304e4d643fe89cd000068dcbba7e7519539caa
+    integrity:
+      sha256: f9a24097b34bea3ea8a23441347626162a96eb2d09b42900f35cf2718c6e0693
+    license:
+      spdx: UNKNOWN
+      notice_file: null
+      redistribution: prohibited_until_upstream_license_review
+    tracked: false
+
+  - id: tabletop.lift.box.v1
+    display_name: Tabletop lift — box
+    version: 1
+    runtime:
+      type: xrobotoolkit_scene_teleop
+      alias: box
+      actuators: 43
+      xml: third_party/decoupled_wbc/control/robot_model/model_data/g1/lift_box_43dof.xml
+    objects: [tabletop.box.v1]
+    task:
+      type: lift
+      reset: both_side_grips
+      success: object_height
+    source:
+      type: git
+      uri: https://github.com/songlin/decoupled_wbc
+      revision: 5b304e4d643fe89cd000068dcbba7e7519539caa
+    integrity:
+      sha256: 5407fa0a89af82c95ad9b8a455b6be9101492702ea4c73a2cd445b20952a004c
+    license:
+      spdx: UNKNOWN
+      notice_file: null
+      redistribution: prohibited_until_upstream_license_review
+    tracked: false
+
+  - id: tabletop.pick-and-place.robosuite-can.v1
+    display_name: Tabletop pick and place — robosuite can
+    version: 1
+    runtime:
+      type: xrobotoolkit_scene_teleop
+      alias: robosuite-can
+      actuators: 43
+      xml: outputs/scenes/robosuite_can_43dof.xml
+      generated: true
+    objects: [household.can.robosuite.v1]
+    task:
+      type: pick_and_place
+      reset: both_side_grips
+      success: object_displacement
+    source:
+      type: generated
+      uri: https://github.com/ARISE-Initiative/robosuite
+      revision: 824ac14cefcfb7ec125fe5eb2e0bad7364466154
+    integrity:
+      sha256: 5864a8f4aa3d0b514a8eca7cb9e3009bee09c6be47ba2a579d90d773a0858021
+    license:
+      spdx: MIT
+      notice_file: assets/objects/robosuite/can/v1/LICENSE
+      redistribution: allowed_with_mit_notice
+    tracked: false
+
+  - id: tabletop.pick-and-place.robosuite-bottle.v1
+    display_name: Tabletop pick and place — robosuite bottle
+    version: 1
+    runtime:
+      type: xrobotoolkit_scene_teleop
+      alias: robosuite-bottle
+      actuators: 43
+      xml: outputs/scenes/robosuite_bottle_43dof.xml
+      generated: true
+    objects: [household.bottle.robosuite.v1]
+    task:
+      type: pick_and_place
+      reset: both_side_grips
+      success: object_displacement
+    source:
+      type: generated
+      uri: https://github.com/ARISE-Initiative/robosuite
+      revision: 824ac14cefcfb7ec125fe5eb2e0bad7364466154
+    integrity:
+      sha256: 3bb8e0b02ac75fa5c7bb77409c9e721a3c46280779c46d46492aa30a04e044ac
+    license:
+      spdx: MIT
+      notice_file: assets/objects/robosuite/bottle/v1/LICENSE
+      redistribution: allowed_with_mit_notice
+    tracked: false
+
+  - id: tabletop.pick-and-place.robosuite-lemon.v1
+    display_name: Tabletop pick and place — robosuite lemon
+    version: 1
+    runtime:
+      type: xrobotoolkit_scene_teleop
+      alias: robosuite-lemon
+      actuators: 43
+      xml: outputs/scenes/robosuite_lemon_43dof.xml
+      generated: true
+    objects: [household.lemon.robosuite.v1]
+    task:
+      type: pick_and_place
+      reset: both_side_grips
+      success: object_displacement
+    source:
+      type: generated
+      uri: https://github.com/ARISE-Initiative/robosuite
+      revision: 824ac14cefcfb7ec125fe5eb2e0bad7364466154
+    integrity:
+      sha256: 78c0a5f8ce87bb16a99ffdbd54b7622e0c843ce7696cc41f73b2f709bf68f541
+    license:
+      spdx: MIT
+      notice_file: assets/objects/robosuite/lemon/v1/LICENSE
+      redistribution: allowed_with_mit_notice
+    tracked: false

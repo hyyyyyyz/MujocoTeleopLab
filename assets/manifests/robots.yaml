@@ -1,0 +1,59 @@
+schema_version: 1
+kind: robots
+description: >-
+  Downloaded robot bundles used by Teleopit. Meshes and XML files remain
+  outside Git; this file records provenance and redistribution status only.
+assets:
+  - id: unitree.g1.29dof
+    display_name: Unitree G1 29-DOF
+    version: 1
+    source:
+      type: modelscope
+      uri: BingqianWu/Teleopit-models
+      path: archives/robot_assets.tar.gz
+      revision: release-managed
+    license:
+      spdx: BSD-3-Clause
+      notice_file: assets/robots/unitree_g1/LICENSE
+      redistribution: verify_upstream_before_redistribution
+    paths:
+      model: assets/robots/unitree_g1/g1_29dof.xml
+    integrity:
+      sha256: 512ccfe8b811e2bfaec0c2fc57960941371e189b365db5c1ff874474166800a3
+    tracked: false
+
+  - id: unitree.g1.29dof.dex3
+    display_name: Unitree G1 29-DOF with Dex3
+    version: 1
+    source:
+      type: modelscope
+      uri: BingqianWu/Teleopit-models
+      path: archives/robot_assets.tar.gz
+      revision: release-managed
+    license:
+      spdx: BSD-3-Clause
+      notice_file: assets/robots/unitree_g1/LICENSE
+      redistribution: verify_upstream_before_redistribution
+    paths:
+      model: assets/robots/unitree_g1/g1_29dof_dex3.xml
+    integrity:
+      sha256: 84cda803da0140e6574c5724811441c630d06a332d5dcd8aa6ae89b9253755a8
+    tracked: false
+
+  - id: unitree.g1.29dof.neck-o6
+    display_name: Unitree G1 29-DOF with neck and O6 hands
+    version: 1
+    source:
+      type: modelscope
+      uri: BingqianWu/Teleopit-models
+      path: archives/robot_assets.tar.gz
+      revision: release-managed
+    license:
+      spdx: BSD-3-Clause
+      notice_file: assets/robots/unitree_g1/LICENSE
+      redistribution: verify_upstream_before_redistribution
+    paths:
+      model: assets/robots/unitree_g1/g1_29dof_neck_o6.xml
+    integrity:
+      sha256: 84469d60b48bb19804fa67b813ed126eeaae0cadfb31fe772c60300b5c1aa923
+    tracked: false

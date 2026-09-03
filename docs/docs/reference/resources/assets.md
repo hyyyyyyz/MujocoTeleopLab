@@ -16,6 +16,43 @@ and maintainer reference.
 - `data/`, `ckpt/`, checkpoints, caches
 - Demo media (`assets/demo.gif`, `assets/demo.mp4`)
 
+## Scene and Object Catalog
+
+The lightweight catalog in [`assets/manifests/`](../../../../assets/manifests/README.md)
+is the source of truth for simulation scene and object metadata. It records a
+stable ID, upstream URL and revision, local download path, task semantics,
+license/redistribution status, and (when available) a SHA256 digest. It does
+not copy third-party XML, meshes, textures, or policies into Git.
+
+The current `cube`, `bottle`, and `box` scenes are downloaded from the
+`songlin/decoupled_wbc` checkout used by the isolated scene runtime. Its
+license is not confirmed in the checkout, so the manifests intentionally mark
+these entries `UNKNOWN` and prohibit redistribution until the upstream author
+provides a compatible license and notice. This is a compliance guard, not a
+claim that the upstream project has no license.
+
+The optional robosuite tabletop adapters add `robosuite-bottle`,
+`robosuite-can`, and `robosuite-lemon`. Install an object and build its
+ignored 43-DOF scene with:
+
+```bash
+.venv/bin/python scripts/setup/download_scene_object.py can
+.venv_scene/bin/python scripts/setup/build_scene_with_object.py can
+.venv_scene/bin/python scripts/run/run_scene_teleop.py --scene robosuite-can
+```
+
+Validate metadata on a clean checkout:
+
+```bash
+.venv/bin/python scripts/dev/validate_asset_manifests.py
+```
+
+After downloading the referenced files, also validate local paths:
+
+```bash
+.venv/bin/python scripts/dev/validate_asset_manifests.py --check-files
+```
+
 ## Asset Inventory
 
 | Group | Local result | Used for |

@@ -20,6 +20,7 @@ const sidebars: SidebarsConfig = {
         'tutorials/scene-teleop',
         'tutorials/pico-sim2real',
         'tutorials/high-level-policy-sim2real',
+        'tutorials/vla-data-generation',
         'tutorials/training',
       ],
     },
@@ -41,6 +42,7 @@ const sidebars: SidebarsConfig = {
           label: 'Resources',
           items: [
             'reference/resources/assets',
+            'reference/resources/asset-sourcing',
             'reference/resources/motion-datasets',
             'reference/resources/teleoperation-datasets',
           ],

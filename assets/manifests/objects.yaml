@@ -1,0 +1,168 @@
+schema_version: 1
+kind: objects
+description: >-
+  Objects currently embedded in the released decoupled-WBC tabletop scenes.
+  These entries are metadata only; the upstream checkout is intentionally not
+  copied into this repository.
+assets:
+  - id: tabletop.cube.v1
+    display_name: Tabletop cube
+    version: 1
+    source:
+      type: git
+      uri: https://github.com/songlin/decoupled_wbc
+      revision: 5b304e4d643fe89cd000068dcbba7e7519539caa
+      path: control/robot_model/model_data/g1/pnp_cube_43dof.xml
+    license:
+      spdx: UNKNOWN
+      notice_file: null
+      redistribution: prohibited_until_upstream_license_review
+    geometry:
+      visual: primitive
+      collision: primitive
+      shape: box
+      size_m: [0.035, 0.035, 0.035]
+    paths:
+      scene_xml: third_party/decoupled_wbc/control/robot_model/model_data/g1/pnp_cube_43dof.xml
+    integrity:
+      sha256: ffa071690f4cd3db2ecc55f34edbbf2d3d9c0054c2e784598b572c1f0ed37c3f
+    mujoco:
+      body: cube_body
+      geom: cube
+      free_joint: cube_joint
+    tracked: false
+
+  - id: tabletop.bottle.v1
+    display_name: Tabletop bottle
+    version: 1
+    source:
+      type: git
+      uri: https://github.com/songlin/decoupled_wbc
+      revision: 5b304e4d643fe89cd000068dcbba7e7519539caa
+      path: control/robot_model/model_data/g1/pnp_bottle_43dof.xml
+    license:
+      spdx: UNKNOWN
+      notice_file: null
+      redistribution: prohibited_until_upstream_license_review
+    geometry:
+      visual: primitive
+      collision: primitive
+      shape: cylinder
+      size_m: [0.03, 0.075]
+    paths:
+      scene_xml: third_party/decoupled_wbc/control/robot_model/model_data/g1/pnp_bottle_43dof.xml
+    integrity:
+      sha256: f9a24097b34bea3ea8a23441347626162a96eb2d09b42900f35cf2718c6e0693
+    mujoco:
+      body: bottle_body
+      geom: bottle
+      free_joint: cube_joint
+    tracked: false
+
+  - id: tabletop.box.v1
+    display_name: Tabletop box
+    version: 1
+    source:
+      type: git
+      uri: https://github.com/songlin/decoupled_wbc
+      revision: 5b304e4d643fe89cd000068dcbba7e7519539caa
+      path: control/robot_model/model_data/g1/lift_box_43dof.xml
+    license:
+      spdx: UNKNOWN
+      notice_file: null
+      redistribution: prohibited_until_upstream_license_review
+    geometry:
+      visual: primitive
+      collision: primitive
+      shape: box
+      size_m: [0.1, 0.1, 0.1]
+    paths:
+      scene_xml: third_party/decoupled_wbc/control/robot_model/model_data/g1/lift_box_43dof.xml
+    integrity:
+      sha256: 5407fa0a89af82c95ad9b8a455b6be9101492702ea4c73a2cd445b20952a004c
+    mujoco:
+      body: box_body
+      geom: box
+      free_joint: box_joint
+    tracked: false
+
+  - id: household.bottle.robosuite.v1
+    display_name: Robosuite household bottle
+    version: 1
+    source:
+      type: git
+      uri: https://github.com/ARISE-Initiative/robosuite
+      revision: 824ac14cefcfb7ec125fe5eb2e0bad7364466154
+      path: robosuite/models/assets/objects/bottle.xml
+    license:
+      spdx: MIT
+      notice_file: assets/objects/robosuite/bottle/v1/LICENSE
+      redistribution: allowed_with_mit_notice
+    geometry:
+      visual: mesh
+      collision: primitive
+      source_mesh: robosuite/models/assets/objects/meshes/bottle.stl
+      collision_shape: cylinder
+      collision_size_m: [0.03, 0.075]
+      scale_m: 1.0
+    paths:
+      source_xml: assets/objects/robosuite/bottle/v1/objects/bottle.xml
+      fragment: assets/objects/robosuite/bottle/v1/bottle_fragment.xml
+      mesh: assets/objects/robosuite/bottle/v1/objects/meshes/bottle.stl
+    integrity:
+      sha256: aa724e4080db8bf0bfbf917d047fad952f8bcf50f205310d4bbf5eed66b06d70
+    tracked: false
+
+  - id: household.can.robosuite.v1
+    display_name: Robosuite household can
+    version: 1
+    source:
+      type: git
+      uri: https://github.com/ARISE-Initiative/robosuite
+      revision: 824ac14cefcfb7ec125fe5eb2e0bad7364466154
+      path: robosuite/models/assets/objects/can.xml
+    license:
+      spdx: MIT
+      notice_file: assets/objects/robosuite/can/v1/LICENSE
+      redistribution: allowed_with_mit_notice
+    geometry:
+      visual: mesh
+      collision: primitive
+      source_mesh: robosuite/models/assets/objects/meshes/can.stl
+      collision_shape: cylinder
+      collision_size_m: [0.033, 0.05]
+      scale_m: 1.0
+    paths:
+      source_xml: assets/objects/robosuite/can/v1/objects/can.xml
+      fragment: assets/objects/robosuite/can/v1/can_fragment.xml
+      mesh: assets/objects/robosuite/can/v1/objects/meshes/can.stl
+    integrity:
+      sha256: c9401545f5e9b621d957e75432b0fc551ab94de96cd41833604080d0c16889a1
+    tracked: false
+
+  - id: household.lemon.robosuite.v1
+    display_name: Robosuite household lemon
+    version: 1
+    source:
+      type: git
+      uri: https://github.com/ARISE-Initiative/robosuite
+      revision: 824ac14cefcfb7ec125fe5eb2e0bad7364466154
+      path: robosuite/models/assets/objects/lemon.xml
+    license:
+      spdx: MIT
+      notice_file: assets/objects/robosuite/lemon/v1/LICENSE
+      redistribution: allowed_with_mit_notice
+    geometry:
+      visual: mesh
+      collision: primitive
+      source_mesh: robosuite/models/assets/objects/meshes/lemon.stl
+      collision_shape: ellipsoid
+      collision_size_m: [0.038, 0.025, 0.03]
+      scale_m: 1.0
+    paths:
+      source_xml: assets/objects/robosuite/lemon/v1/objects/lemon.xml
+      fragment: assets/objects/robosuite/lemon/v1/lemon_fragment.xml
+      mesh: assets/objects/robosuite/lemon/v1/objects/meshes/lemon.stl
+    integrity:
+      sha256: 1c377709b2e2efd185b9cf7cad5e410d255d73d545fc841aad16c363575da374
+    tracked: false
