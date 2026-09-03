@@ -20,8 +20,7 @@ ENV LANG=C.UTF-8 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
 
-RUN rm -f /etc/resolv.conf && \
-    printf 'nameserver %s\nnameserver %s\n' "${BUILD_DNS_1}" "${BUILD_DNS_2}" > /etc/resolv.conf && \
+RUN printf 'nameserver %s\nnameserver %s\n' "${BUILD_DNS_1}" "${BUILD_DNS_2}" > /etc/resolv.conf && \
     apt-get update && apt-get install -y --no-install-recommends \
       python3.10 python3.10-dev python3-pip python3-venv \
       build-essential git curl ca-certificates pkg-config \
