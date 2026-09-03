@@ -229,7 +229,8 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         if hasattr(last_tstep, "item"):
             end = int(last_tstep.item())
         else:
-            end = int(np.asarray(last_tstep).reshape(-1)[0])
+            first_tstep = last_tstep[0]
+            end = int(first_tstep.item()) if hasattr(first_tstep, "item") else int(first_tstep)
         position = result.interpolated_plan.trim_trajectory(0, end).position
         if position.ndim == 3:
             position = position[0]
