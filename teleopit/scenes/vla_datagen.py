@@ -205,7 +205,12 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         if missing:
             raise RuntimeError(f"CuRobo joint list is not present in the 43-DOF scene: {missing[:5]}")
         init = torch.tensor([current[name] for name in names], device="cuda", dtype=torch.float32).view(1, -1)
-        state = self._JointState.from_position(self._TensorDeviceType().to_device(init), joint_names=names)
+        # CuRobo's JointState.clone() calls ``joint_names.copy()``; pass a
+        # list rather than the tuple exposed by MotionGen for compatibility
+        # with the pinned release.
+        state = self._JointState.from_position(
+            self._TensorDeviceType().to_device(init), joint_names=list(names)
+        )
         goal = self._Pose(
             position=torch.tensor(goal_position, device="cuda", dtype=torch.float32).view(1, 3),
             quaternion=torch.tensor(goal_quat, device="cuda", dtype=torch.float32).view(1, 4),
