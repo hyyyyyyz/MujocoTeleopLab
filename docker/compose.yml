@@ -5,6 +5,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      # The 5090 server resolves external registries through the host network;
+      # use the same path for apt/pip during image construction.
+      network: host
       args:
         CUROBO_REVISION: ${CUROBO_REVISION:-a56e0f06db9efb99232586db18b18b323cb22c47}
         TORCH_VERSION: ${TORCH_VERSION:-2.7.1}
