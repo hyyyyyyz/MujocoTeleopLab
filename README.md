@@ -1,22 +1,43 @@
-<p align="center">
-  <img src="assets/teleopit.png" width="720" alt="Teleopit whole-body teleoperation demo">
-</p>
-
-<h1 align="center">Teleopit</h1>
+<h1 align="center">MujocoTeleopLab</h1>
 
 <p align="center">
-  Lightweight, extensible whole-body teleoperation framework for humanoid robots.
+  Simulation-first research workspace for PICO/XRoboToolkit teleoperation and
+  automatic VLA data generation.
   <br/>
-  Real-time motion retargeting from BVH / Pico 4 VR to Unitree G1, in MuJoCo sim or on real hardware.
+  MuJoCo tabletop scenes, Unitree G1/Dex3 manipulation, reusable open-source
+  assets, and collision-aware CuRobo planning.
 </p>
 
 <p align="center">
-  <a href="https://botrunner64.github.io/teleopit-page/">Project Homepage</a> &bull;
-  <a href="https://BotRunner64.github.io/Teleopit/">Documentation</a> &bull;
-  <a href="https://BotRunner64.github.io/Teleopit/zh-Hans/">中文文档</a>
+  <a href="https://github.com/hyyyyyyz/MujocoTeleopLab">Source code</a> &bull;
+  <a href="docs/docs/intro.md">Documentation</a> &bull;
+  <a href="docs/i18n/zh-Hans/docusaurus-plugin-content-docs/current/intro.md">中文文档</a>
 </p>
 
 ---
+
+## About MujocoTeleopLab
+
+MujocoTeleopLab is an independent project for building and testing robot
+manipulation tasks in simulation. Its main workflow is:
+
+```text
+PICO + XRoboToolkit → 43-DOF G1/Dex3 MuJoCo scene → task trajectories → VLA dataset
+```
+
+The repository keeps the `teleopit` Python package name for compatibility with
+the existing runtime and configuration APIs, but this project is maintained
+under the MujocoTeleopLab name. The scene teleoperation runtime, asset catalog,
+object import tools, and VLA/CuRobo data pipeline are project-specific work.
+
+Some low-level retargeting and robot-control components originate from the
+open-source Teleopit ecosystem. They are retained under their applicable
+licenses and are listed as dependencies or upstream sources; this repository is
+not an official Teleopit release.
+
+Third-party scene and object files are downloaded, not silently copied into
+Git. Their source revision, license status, checksum, and task semantics are
+recorded in [`assets/manifests/`](assets/manifests/README.md).
 
 ## Quick Start — Minimal Sim2Sim
 
@@ -87,52 +108,39 @@ The catalog does not redistribute third-party meshes or XML; validate it with
 
 ## Documentation
 
-Full docs at **[BotRunner64.github.io/Teleopit](https://BotRunner64.github.io/Teleopit/)**, covering installation profiles, all tutorials, configuration reference, and architecture.
+The local documentation covers installation profiles, PICO/XRoboToolkit scene
+teleoperation, asset governance, VLA data generation, configuration, and
+architecture. Start with [`docs/docs/intro.md`](docs/docs/intro.md).
 
-## Changelog
+## Current capabilities
 
-### v0.5.0 (2026-08-03)
+- PICO/XRoboToolkit scene teleoperation with SIMPLE-style activation, walking,
+  camera control, hand gestures, and MuJoCo Remote Vision.
+- Reusable `cube`, `bottle`, and `box` tasks plus governed robosuite object
+  imports for `bottle`, `can`, and `lemon`.
+- Automatic VLA scene-data generation with language/task metadata, images,
+  state/action arrays, and a CuRobo collision-planning backend when CUDA is
+  available.
+- Compatible 29-DOF G1 motion-retargeting and ONNX sim2sim runtime for
+  regression tests and baseline comparisons.
 
-- Added an independent host high-level-policy sim2real runtime with a strict msgpack/ZeroMQ protocol, asynchronous receding-horizon replanning, timestamp-aligned scheduling, and validated, rate-limited 50 Hz output.
-- Extended G1 peripheral support with OpenNeck 0.2.0 physical-angle control, Pico HMD active-vision mapping, LinkerHand O6 hand-pose control through somehand 0.3.0, and hand/neck state readback.
-- Updated sim2real recording and review around `schema.json`, `episodes.jsonl`, per-episode HDF5 files, compressed MP4 video, optional hand/neck state and action fields, and a synchronized recording viewer.
-- Added matched G1 model/policy pairs: `g1_29dof.xml` with `ckpt/track_g1.{pt,onnx}`, and `g1_29dof_neck_o6.xml` with `ckpt/track_g1_neck_o6.{pt,onnx}`.
-- Updated the OmniXtreme-style benchmark and hardened Pico/RealSense recovery, GMR mocap-entry cold start, the high-level-policy watchdog, and reference safety handling.
+The project is under active development. Generated assets and datasets are
+downloaded locally and are intentionally excluded from the source repository;
+use the setup scripts and manifests to reproduce them on another machine.
 
-#### Migration notes
+## Development history
 
-- The v0.4 root-level `track.{pt,onnx}` paths are replaced by `ckpt/track_g1.{pt,onnx}`; the neck-and-O6 runtime requires its matching robot model and policy.
-- The old attribute-based sim2real HDF5 format is unsupported; recording, conversion, and review use the current manifest-based source layout.
-- The host-policy protocol has no legacy envelope compatibility, and the old normalized OpenNeck API is unsupported; Teleopit and its companion runtimes must use matching versions.
+### 2026-09 — MujocoTeleopLab foundation
 
-### v0.4.0 (2026-06-25)
-
-- Improved Pico realtime control with pico-bridge 0.2.1, `ARMS` mode, armed sim2real mocap entry, and retargeter-preserving pause/arms resets.
-- Added optional LinkerHand L6/O6 sim2real control, including Pico gripper input and low-latency L6/O6 `vr_hand_pose`.
-- Added manual Pico sim2real HDF5 recording and an interactive Pico motion recorder for training NPZ clips.
-- Refined the training data path with minimal HDF5 shards, explicit precompute, rewind sampling, and updated tracking rewards.
-
-### v0.3.0 (2026-05-12)
-
-- Consolidated realtime input around pico-bridge 0.2.0 and removed the old ZMQ/onboard Pico path.
-- Unified sim/sim2real reference buffering, resume realignment, and velocity smoothing.
-- Added UDP BVH realtime input, online sim config, multi-viewer support, and fixed camera viewing.
-- Split sim2real reference/safety runtime modules and updated the G1 MuJoCo camera asset.
-
-### v0.2.0 (2026-04-03)
-
-- Added Pico 4 teleoperation through pico-bridge and the G1 Bridge SDK.
-- Added offline playback keyboard controls, Pico sim2sim mode control, and a standalone standing controller.
-- Improved realtime mocap buffering/catch-up and upgraded the released model to the 30k checkpoint.
-
-### v0.1.1 (2026-03-28)
-
-- Dataset shard-only refactor
-- External asset management (ModelScope), repository slimming
-
-### v0.1.0 (2026-03-25)
-
-- Initial public release: General-Tracking-G1 training, ONNX sim2sim inference, Pico 4 VR teleoperation, Unitree G1 hardware deployment
+- Established the independent MujocoTeleopLab project and simulation-first
+  workflow for PICO/XRoboToolkit tabletop manipulation.
+- Added governed scene/object manifests, reproducible asset download/build
+  scripts, and robosuite object integration.
+- Added the VLA scene-data recorder and CuRobo planner interface, with clear
+  CUDA requirements and a dependency-light smoke-test planner.
+- Kept the compatible `teleopit` package and 29-DOF runtime as a baseline;
+  future scene, task, and dataset work is developed under this repository's
+  own roadmap.
 
 ## License
 

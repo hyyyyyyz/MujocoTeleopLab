@@ -3,20 +3,25 @@ sidebar_position: 1
 slug: /
 ---
 
-# Teleopit
+# MujocoTeleopLab
 
-Teleopit 是一套面向 Unitree G1 的**全具身人形机器人遥操作系统**。操作者戴上支持的
-Pico 头显后，可以实时控制机器人的全身动作。机载部署还可以接入可选的 LinkerHand
-控制手势，并通过可选的 OpenNeck 把头部动作转换为机器人相机朝向。
+MujocoTeleopLab 是一个以仿真为先的研究工作区，面向 **PICO/XRoboToolkit
+遥操作、桌面操作和 VLA 数据生成**。主要目标是 43 自由度 Unitree G1/Dex3
+MuJoCo 场景：操作者可以控制机器人与物体交互，也可以使用 CuRobo 自动生成
+具备碰撞约束的轨迹，用于数据采集。
+
+仓库同时保留了兼容的 `teleopit` 全身动作重定向运行时，用于标准 G1 全身实验。
+保留这个包名是为了兼容已有 API 和配置；项目本身以 MujocoTeleopLab 独立维护，
+并非 Teleopit 官方发行版。
 
 同一套运控策略会先在 MuJoCo 中运行。你可以先在仿真里确认动作和控制方式，再连接
 真实机器人。
 
 ## 从这里开始
 
-第一次使用 Teleopit 时，建议按这个顺序：
+第一次使用 MujocoTeleopLab 时，建议按这个顺序：
 
-1. 根据自己的目标[安装 Teleopit](getting-started/installation)，并完成该页面最后的
+1. 根据自己的目标[安装 MujocoTeleopLab](getting-started/installation)，并完成该页面最后的
    安装检查。
 2. 从下面七条路径中选择一条继续。
 

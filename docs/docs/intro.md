@@ -3,24 +3,30 @@ sidebar_position: 1
 slug: /
 ---
 
-# Teleopit
+# MujocoTeleopLab
 
-> **Looking for Chinese docs?** [中文文档点此进入](https://BotRunner64.github.io/Teleopit/zh-Hans/)
+> **Looking for Chinese docs?** Use the Chinese-language documentation build
+> for this project.
 
-Teleopit is a **full-embodiment humanoid teleoperation system for the Unitree
-G1**. With a supported Pico headset, an operator can drive the robot's
-whole-body motion in real time. In onboard deployments, optional LinkerHand
-hands reproduce hand gestures, and an optional OpenNeck gimbal turns head
-motion into active camera control.
+MujocoTeleopLab is a simulation-first research workspace for **PICO/
+XRoboToolkit teleoperation, tabletop manipulation, and VLA data generation**.
+Its main target is a 43-DOF Unitree G1/Dex3 MuJoCo scene: an operator can
+control the robot and interact with objects, while automatic CuRobo planning
+can generate collision-aware trajectories for dataset collection.
+
+The repository also includes the compatible `teleopit` motion-retargeting
+runtime for standard G1 whole-body experiments. That package name is retained
+for API/configuration compatibility; the project itself is maintained as
+MujocoTeleopLab and is not an official Teleopit release.
 
 The same motion controller runs in MuJoCo first, so you can check tracking and
 controls before connecting a physical robot.
 
 ## Start Here
 
-If this is your first time using Teleopit:
+If this is your first time using MujocoTeleopLab:
 
-1. [Install Teleopit](getting-started/installation) for the job you want to do
+1. [Install MujocoTeleopLab](getting-started/installation) for the job you want to do
    and complete the check at the end of that page.
 2. Continue with one of the seven guides below.
 
