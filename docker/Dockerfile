@@ -18,7 +18,15 @@ ENV LANG=C.UTF-8 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN printf '%s\n' \
+      '185.125.190.83 archive.ubuntu.com' \
+      '91.189.92.24 security.ubuntu.com' \
+      '23.49.105.55 developer.download.nvidia.com' \
+      '20.205.243.166 github.com' \
+      '20.205.243.165 codeload.github.com' \
+      '151.101.64.223 pypi.org files.pythonhosted.org' \
+      '65.8.76.80 download.pytorch.org' >> /etc/hosts && \
+    apt-get update && apt-get install -y --no-install-recommends \
       python3.10 python3.10-dev python3-pip python3-venv \
       build-essential git curl ca-certificates pkg-config \
       libglfw3 libgl1 libegl1 libgles2 libosmesa6 libx11-6 libxext6 \
