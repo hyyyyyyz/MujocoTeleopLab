@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # CUDA-enabled runtime for MujocoTeleopLab on NVIDIA GPUs (including RTX 5090).
 # The host NVIDIA driver is supplied by nvidia-container-toolkit; it is not
 # installed in the image.
@@ -18,7 +19,7 @@ ENV LANG=C.UTF-8 \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --network=host apt-get update && apt-get install -y --no-install-recommends \
       python3.10 python3.10-dev python3-pip python3-venv \
       build-essential git curl ca-certificates pkg-config \
       libglfw3 libgl1 libegl1 libgles2 libosmesa6 libx11-6 libxext6 \
