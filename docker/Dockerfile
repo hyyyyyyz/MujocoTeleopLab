@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # CUDA-enabled runtime for MujocoTeleopLab on NVIDIA GPUs (including RTX 5090).
 # The host NVIDIA driver is supplied by nvidia-container-toolkit; it is not
 # installed in the image.
