@@ -161,7 +161,20 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                         size = np.maximum(size, np.asarray(model.mesh_scale[mesh_id], dtype=np.float64))
                 dims = np.maximum(2.0 * size, 0.01).tolist()
             position = np.asarray(data.geom_xpos[geom_id], dtype=np.float64)
-            quaternion = np.asarray(data.geom_xquat[geom_id], dtype=np.float64)
+            # MuJoCo exposes geom world orientation as a rotation matrix
+            # (`geom_xmat`) rather than a quaternion on MjData.  Convert to
+            # CuRobo's wxyz convention here so custom rotated obstacles are
+            # represented correctly as well.
+            from scipy.spatial.transform import Rotation
+
+            geom_rotation = Rotation.from_matrix(
+                np.asarray(data.geom_xmat[geom_id], dtype=np.float64).reshape(3, 3)
+            )
+            geom_xyzw = geom_rotation.as_quat()
+            quaternion = np.array(
+                [geom_xyzw[3], geom_xyzw[0], geom_xyzw[1], geom_xyzw[2]],
+                dtype=np.float64,
+            )
             position, quaternion = self._relative_pose(position, quaternion)
             world.add_obstacle(
                 self._Cuboid(
