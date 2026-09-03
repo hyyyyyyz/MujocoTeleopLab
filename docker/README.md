@@ -41,8 +41,8 @@ DOCKER_BUILDKIT=1 docker build --network=host \
   -t mujoco-teleoplab:cuda -f docker/Dockerfile .
 ```
 
-在 DNS 受限的服务器上，可给构建命令增加 `--add-host`，将 apt 源解析到服务器
-已验证的地址；这些地址应按服务器实际 DNS 解析结果更新。
+Dockerfile 会在构建层内把 Ubuntu apt 源替换为服务器当前可达的固定 IP，并禁用
+基础 CUDA 镜像中不需要的 NVIDIA apt 源，以绕过 BuildKit 的只读 DNS 挂载。
 
 ## 自动 VLA 数据生成
 
