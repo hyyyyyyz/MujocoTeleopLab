@@ -42,12 +42,20 @@ WORKDIR /opt
 # CuRobo is pinned so a rebuilt image does not silently change planner APIs.
 RUN git clone --filter=blob:none https://github.com/NVlabs/curobo.git /opt/curobo && \
     git -C /opt/curobo fetch --depth 1 origin "${CUROBO_REVISION}" && \
-    git -C /opt/curobo checkout --detach "${CUROBO_REVISION}" && \
-    python3.10 -m pip install --no-cache-dir \
-      "torch==${TORCH_VERSION}" --index-url "https://download.pytorch.org/whl/${TORCH_INDEX_CUDA}" && \
-    # Build a regular wheel: this pinned commit has no release tag and its
-    # editable metadata path is incompatible with modern setuptools_scm.
-    python3.10 -m pip wheel --no-cache-dir --no-build-isolation --no-deps \
+    git -C /opt/curobo checkout --detach "${CUROBO_REVISION}"
+
+# The PyTorch index redirects large wheels to download-r2.pytorch.org, which is
+# intermittently reset by restricted server networks.  Download the canonical
+# URL directly with curl retries, then install the local wheel.
+RUN curl -fL --retry 8 --retry-delay 5 --retry-all-errors --connect-timeout 30 \
+      -o /tmp/torch.whl \
+      "https://download.pytorch.org/whl/${TORCH_INDEX_CUDA}/torch-${TORCH_VERSION}%2B${TORCH_INDEX_CUDA}-cp310-cp310-manylinux_2_28_x86_64.whl" && \
+    python3.10 -m pip install --no-cache-dir /tmp/torch.whl && \
+    rm -f /tmp/torch.whl
+
+# Build a regular wheel: this pinned commit has no release tag and its
+# editable metadata path is incompatible with modern setuptools_scm.
+RUN python3.10 -m pip wheel --no-cache-dir --no-build-isolation --no-deps \
       -w /tmp/curobo-wheel /opt/curobo && \
     python3.10 -m pip install --no-cache-dir /tmp/curobo-wheel/*.whl && \
     rm -rf /tmp/curobo-wheel
