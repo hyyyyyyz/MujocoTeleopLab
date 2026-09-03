@@ -9,12 +9,17 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG CUROBO_REVISION=a56e0f06db9efb99232586db18b18b323cb22c47
 ARG TORCH_VERSION=2.7.1
 ARG TORCH_INDEX_CUDA=cu128
+# CuRobo builds CUDA extensions during image construction.  BuildKit does not
+# expose the host GPU to `docker build`, so PyTorch cannot infer an architecture
+# from visible devices.  RTX 5090 is Blackwell compute capability 12.0.
+ARG TORCH_CUDA_ARCH_LIST=12.0
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     MUJOCO_GL=egl \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
 
