@@ -420,7 +420,15 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         object_qpos = int(runtime.model.jnt_qposadr[joint_id])
         object_pose = np.asarray(runtime.data.qpos[object_qpos : object_qpos + 7], dtype=np.float64)
         variation = self.episode_variation(episode_index)
-        target = object_pose[:3].copy()
+        # The released G1 hand geometry extends roughly +X from the palm to
+        # the finger pads.  CuRobo's EE link is the palm, so planning the palm
+        # at the object's center (the old implementation) put the fingers
+        # behind the object and produced a visual push rather than a grasp.
+        # Keep the object center as the task point and offset the palm behind
+        # it, matching SIMPLE's grasp-pose convention.
+        palm_offset = np.array([-0.11, 0.0, 0.0], dtype=np.float64)
+        grasp = object_pose[:3] + palm_offset
+        target = grasp.copy()
         target[2] += variation["lift"]
         place = target.copy()
         place[0] += variation["place_dx"]
@@ -434,7 +442,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         segments: list[tuple[np.ndarray, tuple[str, ...], float, float]] = []
         for position, trigger, grip in (
             (target, 0.0, 0.0),
-            (object_pose[:3], 1.0, 1.0),
+            (grasp, 1.0, 1.0),
             (target + np.array([0, 0, 0.15]), 1.0, 1.0),
             (place, 1.0, 1.0),
             (place, 0.0, 0.0),
