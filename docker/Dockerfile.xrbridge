@@ -17,7 +17,7 @@ RUN sed -i \
       -e 's|http://archive.ubuntu.com/ubuntu|http://185.125.190.83/ubuntu|g' \
       -e 's|http://security.ubuntu.com/ubuntu|http://91.189.92.24/ubuntu|g' \
       -e 's|^deb .*developer.download.nvidia.com.*|# disabled: CUDA is provided by the base image|' \
-      /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true && \
+      /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true && \
     apt-get update -o Acquire::http::Pipeline-Depth=0 && apt-get install -y --no-install-recommends \
       python3.12 python3.12-dev python3.12-venv \
       build-essential cmake ninja-build git curl ca-certificates dpkg-dev \
