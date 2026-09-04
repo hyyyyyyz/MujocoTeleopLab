@@ -24,8 +24,20 @@ CuRobo 需要 CUDA 版 PyTorch 环境。缺少 CuRobo 时命令会明确失败�
   --scene can --planner curobo --episodes 10 --output-dir outputs/vla_scene_data
 ```
 
-被忽略的输出目录包含 `schema.json`、`episodes.jsonl`、每个 episode 的压缩 NPZ 和图像目录。
-当前 `success` 使用物体位移判定（至少 1 cm）。训练或转换前应删除失败 episode。
+被忽略的输出目录包含 `schema.json`、`episodes.jsonl`、每次尝试的压缩 NPZ、图像目录和 MP4
+诊断视频。`success` 必须同时满足：真实手指接触、物体抬升至少 3 cm、水平搬运至少 10 cm，
+并在释放后回到桌面附近。失败尝试会保留用于排查，但训练前必须过滤掉失败 episode。
+
+如果希望得到固定数量的有效数据，同时保留失败尝试，可以设置更大的尝试预算：
+
+```bash
+.venv_scene/bin/python scripts/run/generate_vla_scene_data.py \
+  --scene cube --planner curobo \
+  --successful-episodes 100 --episodes 140 \
+  --output-dir outputs/vla_scene_data_curobo
+```
+
+如果在尝试预算内没有达到目标数量，命令会以状态码 2 退出。
 
 规划器采用可替换接口。`CuroboSceneTrajectoryPlanner` 是生产后端；`ScriptedPickPlacePlanner`
 仅用于管线测试。

@@ -499,11 +499,30 @@ class ScriptedPickPlacePlanner(SceneTrajectoryPlanner):
     tests; object-specific dimensions can later be replaced by a CuRobo plan.
     """
 
+    @staticmethod
+    def episode_variation(episode_index: int) -> dict[str, float]:
+        """Return bounded, repeatable placement variation.
+
+        The scripted backend deliberately keeps the pre-grasp corridor fixed:
+        unlike CuRobo it has no online IK/collision solve, so perturbing the
+        wrist approach independently can miss the object and produce a push.
+        Variation is therefore applied only to the post-lift placement target.
+        """
+
+        phase = (float(episode_index) * 0.6180339887498949) % 1.0
+        phase2 = (float(episode_index) * 0.4142135623730950 + 0.17) % 1.0
+        return {
+            "place_dx": 0.12 + 0.08 * phase,
+            "place_dy": (phase2 - 0.5) * 0.08,
+        }
+
     def plan(self, *, object_name: str, episode_index: int) -> tuple[WristWaypoint, ...]:
-        # Small deterministic XY variation makes generated episodes useful for
-        # initial VLA training while remaining inside the released table area.
-        offset = ((episode_index % 5) - 2) * 0.015
-        x = 0.05 + offset
+        del object_name
+        variation = self.episode_variation(episode_index)
+        # Keep the approach/contact corridor identical to the validated SIMPLE
+        # baseline.  This avoids turning harmless dataset variation into an
+        # unvalidated open-loop grasp offset.
+        x = 0.05
         y = -0.10
         # The released SIMPLE-compatible scene uses this controller-space pose
         # for a reliable approach/contact configuration.
@@ -512,7 +531,15 @@ class ScriptedPickPlacePlanner(SceneTrajectoryPlanner):
         # raises the wrist.  The old -0.25 value therefore lowered the hand
         # after contact and only pushed the object across the tabletop.
         lift = (x, y, -1.15, 0.0, 0.0, 0.0, 1.0)
-        place = (x + 0.16, y, -1.15, 0.0, 0.0, 0.0, 1.0)
+        place = (
+            x + variation["place_dx"],
+            y + variation["place_dy"],
+            -1.15,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        )
         return (
             WristWaypoint(approach, duration_s=2.0),
             WristWaypoint(approach, trigger=1.0, grip=1.0, duration_s=2.0),

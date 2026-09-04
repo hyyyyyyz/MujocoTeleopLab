@@ -29,9 +29,23 @@ First install/build the selected object scene, then generate episodes:
 ```
 
 The ignored output contains `schema.json`, `episodes.jsonl`, one compressed
-NPZ per episode and an image directory per episode. `success` is currently the
-object-displacement predicate (at least 1 cm). Discard failed episodes before
-training or conversion.
+NPZ per attempt, an image directory and an MP4 diagnostic per attempt.
+`success` requires real finger contact, at least 3 cm of object lift, at least
+10 cm horizontal transfer, and settling back near the tabletop. Failed
+attempts remain in the output for debugging and must be excluded from training.
+
+To collect a fixed number of valid demonstrations while retaining failed
+attempts for inspection, set a larger attempt budget:
+
+```bash
+.venv_scene/bin/python scripts/run/generate_vla_scene_data.py \
+  --scene cube --planner curobo \
+  --successful-episodes 100 --episodes 140 \
+  --output-dir outputs/vla_scene_data_curobo
+```
+
+The command exits with status 2 if the success target is not reached within
+the attempt budget.
 
 ## Replay and validation
 

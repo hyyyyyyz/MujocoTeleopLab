@@ -81,21 +81,52 @@ def _capture(renderer: object, runtime: SceneTeleopRuntime) -> np.ndarray:
 
 def _make_video(frame_dir: Path, video_path: Path, fps: float) -> bool:
     ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        return False
+    if ffmpeg is not None:
+        try:
+            subprocess.run(
+                [
+                    ffmpeg, "-y", "-loglevel", "error", "-framerate", str(fps),
+                    "-i", str(frame_dir / "%06d.jpg"), "-c:v", "libx264",
+                    "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+                    str(video_path),
+                ],
+                check=True,
+            )
+            return video_path.is_file()
+        except (OSError, subprocess.CalledProcessError):
+            pass
+
+    # The scene venv intentionally carries PyAV, while some minimal servers do
+    # not install the ffmpeg command-line binary.  Keep video recording
+    # self-contained so every accepted trajectory has a smooth MP4 diagnostic.
     try:
-        subprocess.run(
-            [
-                ffmpeg, "-y", "-loglevel", "error", "-framerate", str(fps),
-                "-i", str(frame_dir / "%06d.jpg"), "-c:v", "libx264",
-                "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
-                str(video_path),
-            ],
-            check=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
+        import av
+
+        frames = sorted(frame_dir.glob("*.jpg"))
+        if not frames:
+            return False
+        container = av.open(str(video_path), mode="w")
+        # PyAV expects an integer or Fraction for ``rate``; passing a Python
+        # float raises ``AttributeError: numerator`` on current releases.
+        stream = container.add_stream("libx264", rate=max(1, int(round(fps))))
+        stream.width, stream.height = Image.open(frames[0]).size
+        stream.pix_fmt = "yuv420p"
+        for frame_path in frames:
+            with Image.open(frame_path) as image:
+                rgb = image.convert("RGB")
+                video_frame = av.VideoFrame.from_ndarray(np.asarray(rgb), format="rgb24")
+            for packet in stream.encode(video_frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+        container.close()
+        return video_path.is_file()
+    except Exception:
+        try:
+            video_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return False
-    return video_path.is_file()
 
 
 def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float, video_width: int = 640, video_height: int = 360) -> dict[str, object]:
@@ -282,6 +313,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scene", choices=("cube", "bottle", "can", "lemon"), default="can")
     parser.add_argument("--scene-xml", type=Path)
     parser.add_argument("--episodes", type=int, default=1)
+    parser.add_argument(
+        "--successful-episodes",
+        type=int,
+        help="Collect this many successful episodes, retrying failed attempts. "
+        "When set, --episodes is used as the maximum number of attempts.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/vla_scene_data"))
     parser.add_argument("--hz", type=float, default=50.0)
     parser.add_argument("--image-stride", type=int, default=5)
@@ -296,6 +333,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.episodes <= 0 or args.hz <= 0 or args.image_stride <= 0:
         parser.error("episodes, hz and image-stride must be positive")
+    if args.successful_episodes is not None and args.successful_episodes <= 0:
+        parser.error("successful-episodes must be positive")
+    if args.successful_episodes is not None and args.episodes < args.successful_episodes:
+        parser.error("episodes must be at least successful-episodes when retrying")
     if args.video_width <= 0 or args.video_height <= 0 or args.video_width % 2 or args.video_height % 2:
         parser.error("video dimensions must be positive even integers")
     if args.scene == "cube":
@@ -325,8 +366,13 @@ def main(argv: list[str] | None = None) -> int:
         planner = CuroboSceneTrajectoryPlanner(runtime, urdf_path=str(urdf))
     else:
         planner = ScriptedPickPlacePlanner()
+    target_successes = args.successful_episodes
+    max_attempts = args.episodes
+    successes = 0
+    attempts = 0
     with episodes_path.open("w", encoding="utf-8") as stream:
-        for index in range(args.episodes):
+        while attempts < max_attempts and (target_successes is None or successes < target_successes):
+            index = attempts
             started = time.time()
             metrics = generate_planned_episode(runtime, planner=planner, object_name=object_name, episode_index=index, output_dir=output_dir, image_stride=args.image_stride, hz=args.hz, video_width=args.video_width, video_height=args.video_height)
             stream.write(json.dumps({
@@ -338,7 +384,21 @@ def main(argv: list[str] | None = None) -> int:
                 "data": f"episode_{index:06d}.npz",
                 "images": f"episode_{index:06d}",
             }) + "\n")
-    print(f"Generated {args.episodes} VLA episode(s) under {output_dir}")
+            stream.flush()
+            attempts += 1
+            successes += int(bool(metrics["success"]))
+            if target_successes is not None and not metrics["success"]:
+                print(f"Attempt {attempts}/{max_attempts} failed; retrying (successful={successes}/{target_successes})")
+    if target_successes is not None and successes < target_successes:
+        print(
+            f"Collected {successes}/{target_successes} successful episode(s) "
+            f"after {attempts} attempt(s); failed attempts are retained for review."
+        )
+        return 2
+    print(
+        f"Generated {attempts} VLA episode(s) under {output_dir}"
+        + (f" ({successes} successful)" if target_successes is not None else "")
+    )
     return 0
 
 
