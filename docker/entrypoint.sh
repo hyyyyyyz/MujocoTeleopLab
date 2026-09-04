@@ -38,7 +38,8 @@ PY
     ;;
   vla)
     shift || true
-    exec python3.10 scripts/run/generate_vla_scene_data.py --planner curobo "$@"
+    ensure_scene_env
+    exec .venv_scene/bin/python scripts/run/generate_vla_scene_data.py --planner curobo "$@"
     ;;
   replay)
     shift || true
