@@ -171,8 +171,22 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             # CuRobo's URDF intentionally plans the 10-DOF waist/right-arm
             # chain.  Apply the controller-compatible Dex3 finger IK for the
             # trigger/grip state separately so the object is actually held.
-            right_hand_q = runtime._retargeting_ik.right_hand_ik_solver(command.right_fingers)
-            left_hand_q = runtime._retargeting_ik.left_hand_ik_solver(command.left_fingers)
+            # SIMPLE's MP agent uses the robot EEF controller's calibrated
+            # close pose during the grasp/lift/place phases.  Sparse Pico
+            # fingertip gestures are appropriate for teleop, but are not a
+            # deterministic pinch for scripted data generation; they let the
+            # cube slip or tip.  Use the released Dex3 close pose only while
+            # a JointWaypoint explicitly requests a grasp, and retain IK for
+            # the open/approach frames.
+            if joint_waypoint.grasp:
+                right_hand_q = np.asarray(
+                    [0.02331954, -0.02398408, -0.22170663, 0.25662386, 1.3371105, 0.3085137, 0.9805285],
+                    dtype=np.float64,
+                )
+                left_hand_q = np.zeros(len(runtime._left_hand_joint_names), dtype=np.float64)
+            else:
+                right_hand_q = runtime._retargeting_ik.right_hand_ik_solver(command.right_fingers)
+                left_hand_q = runtime._retargeting_ik.left_hand_ik_solver(command.left_fingers)
             runtime._target_by_joint.update(dict(zip(runtime._right_hand_joint_names, right_hand_q, strict=True)))
             runtime._target_by_joint.update(dict(zip(runtime._left_hand_joint_names, left_hand_q, strict=True)))
         else:
