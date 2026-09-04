@@ -42,3 +42,16 @@ SIMPLE, Bodex, GraspNet or DexGraspNet data.
 The manifest at `assets/manifests/grasp_sources.yaml` records these decisions.
 Only metadata and adapters belong in Git; large grasp files remain local or in
 an approved artifact store.
+
+When using the CuRobo scene generator, pass a local cache explicitly:
+
+```bash
+.venv_scene/bin/python scripts/run/generate_vla_scene_data.py \
+  --scene cube --planner curobo \
+  --grasp-asset /path/to/SIMPLE/data/assets/graspnet/dex_grasp/dex3_right/<uid>/<uid>__0.npy
+```
+
+The imported phase hand postures replace the generic close/squeeze posture;
+the object is still simulated as a free MuJoCo body and contact validation is
+unchanged. The asset must correspond to the current object geometry and hand
+model; a grasp generated for another shape is not expected to transfer safely.

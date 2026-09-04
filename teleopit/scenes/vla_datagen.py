@@ -14,6 +14,8 @@ from typing import Any, Iterator
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from .grasp_assets import DexGraspRecord, load_simple_bodex
+
 
 @dataclass(frozen=True)
 class WristWaypoint:
@@ -218,6 +220,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         device: str = "cuda",
         interpolation_dt: float = 0.05,
         collision_activation_distance: float = 0.01,
+        grasp_asset: str | None = None,
     ) -> None:
         try:
             import torch
@@ -258,6 +261,9 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         self._TensorDeviceType = TensorDeviceType
         self._interpolation_dt = float(interpolation_dt)
         self._ee_link = ee_link
+        self._grasp_record: DexGraspRecord | None = None
+        if grasp_asset is not None:
+            self._grasp_record = load_simple_bodex(grasp_asset)
         # CuRobo's TensorDeviceType defaults to the active CUDA device and is
         # more stable across the pinned and upstream releases than passing a
         # version-specific constructor signature.
@@ -466,6 +472,8 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             segments.append((trajectory, names, trigger, grip))
             current.update(dict(zip(names, trajectory[-1], strict=True)))
         waypoints: list[JointWaypoint] = []
+        grasp_record = self._grasp_record
+        right_hand_names = tuple(runtime._right_hand_joint_names)
         # SIMPLE does not hold one binary close pose.  After reaching the
         # grasp it adds a 20-sample Dex3 squeeze stroke, then preserves that
         # stronger posture through lift and transport.  Use the same released
@@ -476,11 +484,29 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         )
         squeeze_direction = np.asarray([0.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64)
         squeeze_hand = close_hand + 0.2 * squeeze_direction
+        phase_hand: dict[str, np.ndarray] = {}
+        if grasp_record is not None:
+            for phase in ("pregrasp", "grasp", "squeeze", "lift"):
+                missing = sorted(set(right_hand_names).difference(getattr(grasp_record, phase)))
+                if missing:
+                    raise RuntimeError(
+                        f"Bodex grasp asset is missing current Dex3 hand joints for {phase}: {missing}"
+                    )
+                phase_hand[phase] = np.asarray(
+                    [getattr(grasp_record, phase)[name] for name in right_hand_names],
+                    dtype=np.float64,
+                )
+            close_hand = phase_hand["grasp"]
+            squeeze_hand = phase_hand["squeeze"]
         phase_names = ("pregrasp", "grasp", "lift", "transport", "release")
         for segment_index, (trajectory, names, trigger, grip) in enumerate(segments):
             for row in trajectory:
                 hand_target = None
-                if segment_index == 1:
+                if grasp_record is not None:
+                    phase = ("pregrasp", "grasp", "lift", "lift", "release")[segment_index]
+                    if phase != "release":
+                        hand_target = tuple(float(value) for value in phase_hand[phase])
+                elif segment_index == 1:
                     hand_target = tuple(float(value) for value in close_hand)
                 elif segment_index in (2, 3):
                     hand_target = tuple(float(value) for value in squeeze_hand)
@@ -506,7 +532,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                 final_row = trajectory[-1]
                 for squeeze_index in range(25):
                     ratio = min(1.0, float(squeeze_index + 1) / 20.0)
-                    hand_target = close_hand + ratio * 0.2 * squeeze_direction
+                    hand_target = close_hand + ratio * (squeeze_hand - close_hand)
                     waypoints.append(
                         JointWaypoint(
                             dict(zip(names, final_row, strict=True)),

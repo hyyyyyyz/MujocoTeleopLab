@@ -346,6 +346,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scene", choices=("cube", "bottle", "can", "lemon"), default="can")
     parser.add_argument("--scene-xml", type=Path)
+    parser.add_argument(
+        "--grasp-asset",
+        type=Path,
+        help="Optional local SIMPLE/Bodex .npy/.npz phase cache. The file is "
+        "read locally and is never copied into the output or Git.",
+    )
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument(
         "--successful-episodes",
@@ -397,7 +403,8 @@ def main(argv: list[str] | None = None) -> int:
         from teleopit.scenes.vla_datagen import CuroboSceneTrajectoryPlanner
 
         urdf = PROJECT_ROOT / "third_party/decoupled_wbc/control/robot_model/model_data/g1/g1_29dof_with_hand.urdf"
-        planner = CuroboSceneTrajectoryPlanner(runtime, urdf_path=str(urdf))
+        grasp_asset = str(args.grasp_asset.resolve()) if args.grasp_asset is not None else None
+        planner = CuroboSceneTrajectoryPlanner(runtime, urdf_path=str(urdf), grasp_asset=grasp_asset)
     else:
         planner = ScriptedPickPlacePlanner()
     target_successes = args.successful_episodes
