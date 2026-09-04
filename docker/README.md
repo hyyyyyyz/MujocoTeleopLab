@@ -91,6 +91,24 @@ docker compose -f docker/compose.yml run --rm mujoco-teleoplab \
 不带 `--interactive` 的 `replay` 命令。SSH 会话必须使用 `-Y`，Compose 会自动传递
 远端的 `DISPLAY` 和 `.Xauthority` 到容器。
 
+如果 X11 窗口仍然卡顿，推荐使用低延迟 H.264 流：MuJoCo 在服务器 EGL 上渲染，
+SSH 只传压缩视频，本地 `ffplay` 负责显示，不需要 X11 或 `-Y`：
+
+```bash
+ssh -T 5090 '
+cd /home/embodied-shared/experiments/MujocoTeleopLab &&
+docker compose -f docker/compose.yml run --rm -T mujoco-teleoplab \
+  replay \
+  --scene can \
+  --episode outputs/vla_scene_data_curobo/episode_000000.npz \
+  --stream --stream-width 640 --stream-height 360
+' | ffplay -fflags nobuffer -flags low_delay -framedrop \
+    -f mpegts -i - -window_title "VLA First-Person Replay"
+```
+
+本地电脑需要安装 `ffplay`（Ubuntu 可安装 `ffmpeg`）。`--stream-width/height` 可以
+改成 `1280 720` 提高画质，但网络带宽和延迟也会增加。
+
 容器会把当前仓库挂载到 `/workspace`，所以生成的数据和下载的资产仍保存在主机
 目录中，并继续遵守 Git 忽略规则。
 
