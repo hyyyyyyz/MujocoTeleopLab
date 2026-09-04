@@ -408,7 +408,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             # released G1 model), then add bounded variation.  Center-table
             # placement leaves the right wrist more than 10 cm off-axis and
             # produces a side brush instead of the SIMPLE grasp approach.
-            "object_dy": -0.21 + (phase2 - 0.5) * 0.05,
+            "object_dy": -0.30 + (phase2 - 0.5) * 0.06,
             "lift": 0.08 + 0.10 * ((phase * 1.7) % 1.0),
             "place_dx": 0.12 + 0.12 * ((phase2 * 1.3) % 1.0),
             "place_dy": (phase * 0.8 % 1.0 - 0.4) * 0.12,
@@ -431,15 +431,14 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         # Keep the object center as the task point and offset the palm behind
         # it, matching SIMPLE's grasp-pose convention.
         palm_offset = np.array([-0.11, 0.0, 0.0], dtype=np.float64)
-        # SIMPLE's released Dex3 grasp primitives use a palm orientation of
-        # ``euler2quat(pi, 0, 0)`` for tabletop objects.  Planning with the
-        # object's identity quaternion leaves the fingers facing away from
-        # the can/cube, so the hand merely brushes its side.  Keep this
-        # orientation for every approach/lift/place pose.
+        # Keep the object's stable orientation for the palm target.  The
+        # activated-finger G1 model's wrist frame already includes the
+        # tabletop rotation; applying an additional pi flip sends the finger
+        # chain sideways and causes a push rather than an enclosing grasp.
         object_rotation = Rotation.from_quat(
             [object_pose[4], object_pose[5], object_pose[6], object_pose[3]]
         )
-        grasp_rotation = object_rotation * Rotation.from_euler("x", np.pi)
+        grasp_rotation = object_rotation
         grasp_xyzw = grasp_rotation.as_quat()
         grasp_quat = np.array(
             [grasp_xyzw[3], grasp_xyzw[0], grasp_xyzw[1], grasp_xyzw[2]],

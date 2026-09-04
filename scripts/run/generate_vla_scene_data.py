@@ -114,9 +114,10 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     waypoints = planner.plan(object_name=object_name, episode_index=episode_index, runtime=runtime) if isinstance(planner, CuroboSceneTrajectoryPlanner) else planner.plan(object_name=object_name, episode_index=episode_index)
     if not waypoints:
         raise RuntimeError("planner returned an empty trajectory")
-    # Enter arm mode using the same SIMPLE chord as the PICO bridge.
-    first_pose = waypoints[0].pose if isinstance(waypoints[0], WristWaypoint) else waypoints[0].wrist_pose
-    activation = controller.update(_packet(1, 0.0, np.asarray(first_pose), 1.0, 0.0, left_menu=True))
+    # Calibrate against SIMPLE's neutral controller pose.  Calibrating on the
+    # first planned waypoint would make the approach a zero-motion command.
+    neutral_pose = np.asarray((0.2, 0.0, -0.3, 0.0, 0.0, 0.0, 1.0), dtype=np.float64)
+    activation = controller.update(_packet(1, 0.0, neutral_pose, 1.0, 0.0, left_menu=True))
     if not activation.activation_toggled:
         raise RuntimeError("failed to activate scripted scene teleoperation")
     if isinstance(waypoints[0], WristWaypoint):
@@ -135,13 +136,21 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     objects: list[np.ndarray] = []
     timestamps: list[float] = []
     grasp_states: list[bool] = []
-    diagnostic_printed = False
-    post_step_diagnostic_printed = False
     attachment = KinematicObjectAttachment(runtime, object_name)
     image_dir = output_dir / f"episode_{episode_index:06d}"
     image_dir.mkdir(parents=True, exist_ok=True)
     sequence = 2
     timestamp = 1.0 / hz
+    # Match SIMPLE's neutral warm-up before sending the approach trajectory.
+    for _ in range(int(round(2.0 * hz))):
+        neutral_packet = _packet(sequence, timestamp, neutral_pose, 0.0, 0.0)
+        neutral_command = controller.update(neutral_packet)
+        runtime.update_policy(neutral_command, active=True)
+        for _ in range(runtime._control_decimation):
+            runtime._apply_pd()
+            runtime._mujoco.mj_step(runtime.model, runtime.data)
+        sequence += 1
+        timestamp += 1.0 / hz
     video_frame_index = 0
     if isinstance(waypoints[0], WristWaypoint):
         samples = ((pose, trigger, grip, None) for pose, trigger, grip in interpolate_waypoints(waypoints, hz=hz))
@@ -160,10 +169,6 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             # that phase begins instead of being numerically ejected by a
             # contact-only finger closure.
             attachment.try_attach(max_distance_m=0.18)
-            if not diagnostic_printed:
-                hand_id = __import__('mujoco').mj_name2id(runtime.model, __import__('mujoco').mjtObj.mjOBJ_BODY, 'right_wrist_yaw_link')
-                print('GRASP_DIAG pre_step hand=', runtime.data.xpos[hand_id].tolist(), 'object=', _object_pose(runtime, object_name)[:3].tolist(), 'hand_xmat=', runtime.data.xmat[hand_id].reshape(3,3).tolist(), 'contact=', attachment.attached, flush=True)
-                diagnostic_printed = True
         elif not grasp_requested and attachment.attached:
             attachment.release()
             released_this_frame = True
@@ -200,12 +205,6 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         for _ in range(runtime._control_decimation):
             runtime._apply_pd()
             runtime._mujoco.mj_step(runtime.model, runtime.data)
-        if grasp_requested and not post_step_diagnostic_printed:
-            mujoco_mod = __import__('mujoco')
-            hand_id = mujoco_mod.mj_name2id(runtime.model, mujoco_mod.mjtObj.mjOBJ_BODY, 'right_wrist_yaw_link')
-            finger_ids = [mujoco_mod.mj_name2id(runtime.model, mujoco_mod.mjtObj.mjOBJ_BODY, n) for n in ('right_hand_index_1_link','right_hand_middle_1_link','right_hand_thumb_2_link')]
-            print('GRASP_DIAG post_step hand=', runtime.data.xpos[hand_id].tolist(), 'fingers=', [runtime.data.xpos[i].tolist() for i in finger_ids], 'object=', _object_pose(runtime, object_name)[:3].tolist(), 'contact=', attachment.attached, 'ncon=', int(runtime.data.ncon), flush=True)
-            post_step_diagnostic_printed = True
         if released_this_frame:
             # Let MuJoCo integrate the released free body.  Do not snap it to
             # the tabletop: SIMPLE records the real drop/settling dynamics.
