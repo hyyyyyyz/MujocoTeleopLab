@@ -70,6 +70,27 @@ docker compose -f docker/compose.yml run --rm mujoco-teleoplab replay \
 物体位移和独立 `success` 判断。命令在 success 或状态重放不匹配时返回非零，
 可直接用于批量筛选数据。
 
+### 实时第一视角回放
+
+通过 SSH X11 转发可以在本地打开 MuJoCo 窗口，并按真实 50 Hz 播放一条已采集
+轨迹。窗口使用运行时插入的 `scene_head_camera`，看到的是机器人头部第一视角；
+关闭窗口即可停止回放，不需要 PICO 或 XRoboToolkit：
+
+```bash
+ssh -Y -tt 5090 '
+cd /home/embodied-shared/experiments/MujocoTeleopLab &&
+docker compose -f docker/compose.yml run --rm mujoco-teleoplab \
+  replay \
+  --scene can \
+  --episode outputs/vla_scene_data_curobo/episode_000000.npz \
+  --interactive
+'
+```
+
+`--interactive` 自动启用实时节奏并关闭离屏 MP4 输出；若只想生成视频，继续使用
+不带 `--interactive` 的 `replay` 命令。SSH 会话必须使用 `-Y`，Compose 会自动传递
+远端的 `DISPLAY` 和 `.Xauthority` 到容器。
+
 容器会把当前仓库挂载到 `/workspace`，所以生成的数据和下载的资产仍保存在主机
 目录中，并继续遵守 Git 忽略规则。
 
