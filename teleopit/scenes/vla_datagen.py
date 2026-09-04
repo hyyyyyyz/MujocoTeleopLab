@@ -520,8 +520,11 @@ class ScriptedPickPlacePlanner(SceneTrajectoryPlanner):
         # The released SIMPLE-compatible scene uses this controller-space pose
         # for a reliable approach/contact configuration.
         approach = (x, y, -0.38, 0.0, 0.0, 0.0, 1.0)
-        lift = (x, y, -0.25, 0.0, 0.0, 0.0, 1.0)
-        place = (x + 0.16, y, -0.25, 0.0, 0.0, 0.0, 1.0)
+        # SIMPLE's Pico/controller frame has inverted Z: more negative input
+        # raises the wrist.  The old -0.25 value therefore lowered the hand
+        # after contact and only pushed the object across the tabletop.
+        lift = (x, y, -0.55, 0.0, 0.0, 0.0, 1.0)
+        place = (x + 0.16, y, -0.55, 0.0, 0.0, 0.0, 1.0)
         return (
             WristWaypoint(approach, duration_s=2.0),
             WristWaypoint(approach, trigger=1.0, grip=1.0, duration_s=2.0),
