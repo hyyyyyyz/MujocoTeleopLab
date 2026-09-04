@@ -1,6 +1,8 @@
 .git
 .venv
 .venv-*/
+.venv_scene/
+.venv-system-python/
 .pytest_cache
 __pycache__/
 *.py[cod]
