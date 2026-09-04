@@ -98,7 +98,7 @@ def load_simple_bodex(
             raise ValueError(
                 f"robot_pose must have shape [N, {len(source_joint_names)}], got {poses.shape}: {asset_path}"
             )
-        if poses.shape[0] < 3:
+        if poses.shape[0] < 4:
             raise ValueError(f"robot_pose must contain at least pregrasp, grasp, squeeze and lift rows: {asset_path}")
         vectors = {
             "pregrasp": poses[0],
