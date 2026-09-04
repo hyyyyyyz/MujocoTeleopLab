@@ -38,16 +38,14 @@ class JointWaypoint:
 
 
 class KinematicObjectAttachment:
-    """Deterministic grasp-hold constraint for dataset generation/replay.
+    """Track a grasp using MuJoCo contacts without changing object state.
 
-    CuRobo plans the arm chain, while Dex3 fingers are commanded separately.
-    Contact-only grasps are highly sensitive to MuJoCo solver settings and can
-    eject light objects during a scripted 50 Hz trajectory.  This helper
-    captures the object's transform relative to the right wrist once the hand
-    closes, then keeps that transform until release.  It is deliberately
-    explicit in the episode's ``grasp_state`` field so downstream training and
-    evaluation can distinguish assisted demonstrations from raw contact-only
-    physics.
+    This class used to overwrite the free body's qpos every frame, which made
+    the object a kinematic child of the wrist and removed gravity, friction,
+    contact impulses, and slip.  SIMPLE's motion-planning data path keeps the
+    object as a normal dynamic body and only closes the hand actuators.  The
+    recorder follows the same rule: this helper is now a contact monitor and
+    never writes object qpos/qvel.
     """
 
     def __init__(self, runtime: Any, object_name: str, *, hand_body: str = "right_wrist_yaw_link") -> None:
@@ -67,13 +65,42 @@ class KinematicObjectAttachment:
             for name in ("right_hand_index_1_link", "right_hand_middle_1_link", "right_hand_thumb_2_link")
             if (candidate := mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)) >= 0
         )
+        self._object_geom_ids = tuple(
+            int(geom_id)
+            for geom_id in range(model.ngeom)
+            if int(model.geom_bodyid[geom_id]) == int(model.jnt_bodyid[joint_id])
+        )
+        self._finger_geom_ids = tuple(
+            int(geom_id)
+            for geom_id in range(model.ngeom)
+            if int(model.geom_bodyid[geom_id]) in self._finger_body_ids
+        )
         self._attached = False
-        self._offset_position = np.zeros(3, dtype=np.float64)
-        self._offset_rotation = Rotation.identity()
+        self._ever_contacted = False
 
     @property
     def attached(self) -> bool:
         return self._attached
+
+    @property
+    def ever_contacted(self) -> bool:
+        return self._ever_contacted
+
+    def _has_finger_contact(self) -> bool:
+        """Return whether a finger collision geom currently touches object."""
+        data = self.runtime.data
+        object_geoms = set(self._object_geom_ids)
+        finger_geoms = set(self._finger_geom_ids)
+        for index in range(int(data.ncon)):
+            contact = data.contact[index]
+            if (int(contact.geom1) in object_geoms and int(contact.geom2) in finger_geoms) or (
+                int(contact.geom2) in object_geoms and int(contact.geom1) in finger_geoms
+            ):
+                # A non-positive distance is a real overlap/touch in MuJoCo;
+                # positive distances are merely broad-phase candidate pairs.
+                if float(contact.dist) <= 1e-4:
+                    return True
+        return False
 
     def _hand_pose(self) -> tuple[np.ndarray, Rotation]:
         data = self.runtime.data
@@ -89,31 +116,21 @@ class KinematicObjectAttachment:
         return position, rotation
 
     def try_attach(self, *, max_distance_m: float = 0.16, force: bool = False) -> bool:
-        object_position, object_rotation = self._object_pose()
-        hand_position, hand_rotation = self._hand_pose()
-        probe_positions = [hand_position]
-        probe_positions.extend(np.asarray(self.runtime.data.xpos[body_id], dtype=np.float64) for body_id in self._finger_body_ids)
-        nearest_distance = min(float(np.linalg.norm(object_position - probe)) for probe in probe_positions)
-        if not force and nearest_distance > max_distance_m:
-            return False
-        self._offset_position = hand_rotation.inv().apply(object_position - hand_position)
-        self._offset_rotation = hand_rotation.inv() * object_rotation
-        self._attached = True
-        self.update()
-        return True
+        # ``max_distance_m`` is retained for API compatibility, but distance
+        # alone is not a grasp.  Require an actual finger/object collision so a
+        # planner cannot silently teleport or weld an object into the hand.
+        del max_distance_m, force
+        contacted = self._has_finger_contact()
+        if contacted:
+            self._attached = True
+            self._ever_contacted = True
+        return contacted
 
     def update(self) -> None:
-        if not self._attached:
-            return
-        hand_position, hand_rotation = self._hand_pose()
-        object_position = hand_position + hand_rotation.apply(self._offset_position)
-        object_rotation = hand_rotation * self._offset_rotation
-        data = self.runtime.data
-        data.qpos[self._joint_qpos : self._joint_qpos + 3] = object_position
-        xyzw = object_rotation.as_quat()
-        data.qpos[self._joint_qpos + 3 : self._joint_qpos + 7] = [xyzw[3], xyzw[0], xyzw[1], xyzw[2]]
-        data.qvel[self._joint_qvel : self._joint_qvel + 6] = 0.0
-        self.runtime._mujoco.mj_forward(self.runtime.model, data)
+        # Object motion is integrated exclusively by ``mj_step``.  Do not
+        # call mj_forward here and never overwrite the free-joint state.
+        if self._attached and not self._has_finger_contact():
+            self._attached = False
 
     def release(self) -> None:
         self._attached = False

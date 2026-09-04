@@ -181,9 +181,9 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             runtime._apply_pd()
             runtime._mujoco.mj_step(runtime.model, runtime.data)
         if released_this_frame:
-            # Release onto the tabletop support plane so the final placement
-            # is not judged by an uncontrolled drop from the wrist.
-            place_object_on_table(runtime, object_name)
+            # Let MuJoCo integrate the released free body.  Do not snap it to
+            # the tabletop: SIMPLE records the real drop/settling dynamics.
+            pass
         else:
             attachment.update()
         state = np.array([runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names], dtype=np.float32)
