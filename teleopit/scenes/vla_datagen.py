@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Iterator
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,129 @@ class JointWaypoint:
     trigger: float = 0.0
     grip: float = 0.0
     duration_s: float = 0.05
+    grasp: bool = False
+
+
+class KinematicObjectAttachment:
+    """Deterministic grasp-hold constraint for dataset generation/replay.
+
+    CuRobo plans the arm chain, while Dex3 fingers are commanded separately.
+    Contact-only grasps are highly sensitive to MuJoCo solver settings and can
+    eject light objects during a scripted 50 Hz trajectory.  This helper
+    captures the object's transform relative to the right wrist once the hand
+    closes, then keeps that transform until release.  It is deliberately
+    explicit in the episode's ``grasp_state`` field so downstream training and
+    evaluation can distinguish assisted demonstrations from raw contact-only
+    physics.
+    """
+
+    def __init__(self, runtime: Any, object_name: str, *, hand_body: str = "right_wrist_yaw_link") -> None:
+        mujoco = runtime._mujoco
+        model = runtime.model
+        joint_name = "cube_joint" if object_name == "cube" else f"robosuite_{object_name}_free"
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, hand_body)
+        if joint_id < 0 or body_id < 0:
+            raise ValueError(f"scene is missing object joint {joint_name!r} or hand body {hand_body!r}")
+        self.runtime = runtime
+        self._joint_qpos = int(model.jnt_qposadr[joint_id])
+        self._joint_qvel = int(model.jnt_dofadr[joint_id])
+        self._hand_body_id = int(body_id)
+        self._finger_body_ids = tuple(
+            int(candidate)
+            for name in ("right_hand_index_1_link", "right_hand_middle_1_link", "right_hand_thumb_2_link")
+            if (candidate := mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)) >= 0
+        )
+        self._attached = False
+        self._offset_position = np.zeros(3, dtype=np.float64)
+        self._offset_rotation = Rotation.identity()
+
+    @property
+    def attached(self) -> bool:
+        return self._attached
+
+    def _hand_pose(self) -> tuple[np.ndarray, Rotation]:
+        data = self.runtime.data
+        position = np.asarray(data.xpos[self._hand_body_id], dtype=np.float64).copy()
+        rotation = Rotation.from_matrix(np.asarray(data.xmat[self._hand_body_id], dtype=np.float64).reshape(3, 3))
+        return position, rotation
+
+    def _object_pose(self) -> tuple[np.ndarray, Rotation]:
+        data = self.runtime.data
+        position = np.asarray(data.qpos[self._joint_qpos : self._joint_qpos + 3], dtype=np.float64).copy()
+        quat = np.asarray(data.qpos[self._joint_qpos + 3 : self._joint_qpos + 7], dtype=np.float64)
+        rotation = Rotation.from_quat([quat[1], quat[2], quat[3], quat[0]])
+        return position, rotation
+
+    def try_attach(self, *, max_distance_m: float = 0.16, force: bool = False) -> bool:
+        object_position, object_rotation = self._object_pose()
+        hand_position, hand_rotation = self._hand_pose()
+        probe_positions = [hand_position]
+        probe_positions.extend(np.asarray(self.runtime.data.xpos[body_id], dtype=np.float64) for body_id in self._finger_body_ids)
+        nearest_distance = min(float(np.linalg.norm(object_position - probe)) for probe in probe_positions)
+        if not force and nearest_distance > max_distance_m:
+            return False
+        self._offset_position = hand_rotation.inv().apply(object_position - hand_position)
+        self._offset_rotation = hand_rotation.inv() * object_rotation
+        self._attached = True
+        self.update()
+        return True
+
+    def update(self) -> None:
+        if not self._attached:
+            return
+        hand_position, hand_rotation = self._hand_pose()
+        object_position = hand_position + hand_rotation.apply(self._offset_position)
+        object_rotation = hand_rotation * self._offset_rotation
+        data = self.runtime.data
+        data.qpos[self._joint_qpos : self._joint_qpos + 3] = object_position
+        xyzw = object_rotation.as_quat()
+        data.qpos[self._joint_qpos + 3 : self._joint_qpos + 7] = [xyzw[3], xyzw[0], xyzw[1], xyzw[2]]
+        data.qvel[self._joint_qvel : self._joint_qvel + 6] = 0.0
+        self.runtime._mujoco.mj_forward(self.runtime.model, data)
+
+    def release(self) -> None:
+        self._attached = False
+
+
+def place_object_on_table(runtime: Any, object_name: str) -> None:
+    """Place one free object onto the compiled scene's tabletop."""
+    mujoco = runtime._mujoco
+    model, data = runtime.model, runtime.data
+    joint_name = "cube_joint" if object_name == "cube" else f"robosuite_{object_name}_free"
+    joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+    if joint_id < 0:
+        raise ValueError(f"scene is missing object free joint {joint_name!r}")
+    object_body = int(model.jnt_bodyid[joint_id])
+    object_geom_ids = [geom_id for geom_id in range(model.ngeom) if int(model.geom_bodyid[geom_id]) == object_body]
+    collision_geom = next(
+        (geom_id for geom_id in object_geom_ids if str(model.geom(geom_id).name).endswith("_collision")),
+        object_geom_ids[0] if object_geom_ids else None,
+    )
+    table_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "table_body")
+    table_geom = next(
+        (geom_id for geom_id in range(model.ngeom) if int(model.geom_bodyid[geom_id]) == table_body and str(model.geom(geom_id).name) == "table_top"),
+        None,
+    )
+    if collision_geom is None or table_geom is None:
+        raise ValueError("scene must contain object geometry and table_top")
+    object_qpos = int(model.jnt_qposadr[joint_id])
+    object_qvel = int(model.jnt_dofadr[joint_id])
+    table_height = float(data.geom_xpos[table_geom][2] + model.geom_size[table_geom][2])
+    object_position = np.asarray(data.qpos[object_qpos : object_qpos + 3], dtype=np.float64)
+    table_center = np.asarray(data.geom_xpos[table_geom], dtype=np.float64)
+    table_half_extents = np.asarray(model.geom_size[table_geom], dtype=np.float64)
+    object_half_extents = np.asarray(model.geom_size[collision_geom], dtype=np.float64)
+    margin = 0.005
+    object_position[:2] = np.clip(
+        object_position[:2],
+        table_center[:2] - table_half_extents[:2] + object_half_extents[:2] + margin,
+        table_center[:2] + table_half_extents[:2] - object_half_extents[:2] - margin,
+    )
+    data.qpos[object_qpos : object_qpos + 2] = object_position[:2]
+    data.qpos[object_qpos + 2] = table_height + float(model.geom_size[collision_geom][2]) + 0.002
+    data.qvel[object_qvel : object_qvel + 6] = 0.0
+    mujoco.mj_forward(model, data)
 
 
 class SceneTrajectoryPlanner:
@@ -270,9 +394,18 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             segments.append((trajectory, names, trigger, grip))
             current.update(dict(zip(names, trajectory[-1], strict=True)))
         waypoints: list[JointWaypoint] = []
-        for trajectory, names, trigger, grip in segments:
+        for segment_index, (trajectory, names, trigger, grip) in enumerate(segments):
             for row in trajectory:
-                waypoints.append(JointWaypoint(dict(zip(names, row, strict=True)), (0.0, 0.0, -0.3, 0.0, 0.0, 0.0, 1.0), trigger, grip, self._interpolation_dt))
+                waypoints.append(
+                    JointWaypoint(
+                        dict(zip(names, row, strict=True)),
+                        (0.0, 0.0, -0.3, 0.0, 0.0, 0.0, 1.0),
+                        trigger,
+                        grip,
+                        self._interpolation_dt,
+                        grasp=segment_index in (1, 2, 3),
+                    )
+                )
         return tuple(waypoints)
 
 

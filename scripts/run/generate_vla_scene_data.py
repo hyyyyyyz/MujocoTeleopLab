@@ -31,6 +31,8 @@ from teleopit.scenes.runtime import SceneTeleopRuntime, scene_xml_path
 from teleopit.scenes.vla_datagen import (
     CuroboSceneTrajectoryPlanner,
     JointWaypoint,
+    KinematicObjectAttachment,
+    place_object_on_table,
     ScriptedPickPlacePlanner,
     WristWaypoint,
     interpolate_waypoints,
@@ -75,53 +77,9 @@ def _capture(renderer: object, runtime: SceneTeleopRuntime) -> np.ndarray:
     return np.asarray(renderer.render(), dtype=np.uint8).copy()
 
 
-def _place_object_on_table(runtime: SceneTeleopRuntime, object_name: str) -> None:
-    """Deterministically reset the manipulated object onto the tabletop.
-
-    Older generated scene XMLs placed robosuite objects at z=0.9 regardless
-    of their size, leaving them suspended above the table.  Set only the free
-    joint's initial z and velocity here so old assets remain usable while the
-    asset builder is corrected for future scenes.
-    """
-    mujoco = runtime._mujoco
-    model, data = runtime.model, runtime.data
-    joint_name = "cube_joint" if object_name == "cube" else f"robosuite_{object_name}_free"
-    joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
-    if joint_id < 0:
-        raise ValueError(f"scene is missing object free joint {joint_name!r}")
-    object_body = int(model.jnt_bodyid[joint_id])
-    object_geom_ids = [
-        geom_id for geom_id in range(model.ngeom) if int(model.geom_bodyid[geom_id]) == object_body
-    ]
-    collision_geom = next(
-        (geom_id for geom_id in object_geom_ids if str(model.geom(geom_id).name).endswith("_collision")),
-        object_geom_ids[0] if object_geom_ids else None,
-    )
-    if collision_geom is None:
-        raise ValueError(f"scene object body {object_body} has no geometry")
-    half_height = float(model.geom_size[collision_geom][2])
-    table_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "table_body")
-    if table_body < 0:
-        raise ValueError("scene is missing table_body")
-    table_top = [
-        geom_id
-        for geom_id in range(model.ngeom)
-        if int(model.geom_bodyid[geom_id]) == table_body and str(model.geom(geom_id).name) == "table_top"
-    ]
-    if not table_top:
-        raise ValueError("scene is missing table_top")
-    table_geom = table_top[0]
-    table_height = float(data.geom_xpos[table_geom][2] + model.geom_size[table_geom][2])
-    object_qpos = int(model.jnt_qposadr[joint_id])
-    object_qvel = int(model.jnt_dofadr[joint_id])
-    data.qpos[object_qpos + 2] = table_height + half_height + 0.002
-    data.qvel[object_qvel : object_qvel + 6] = 0.0
-    mujoco.mj_forward(model, data)
-
-
 def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float) -> dict[str, object]:
     runtime.reset()
-    _place_object_on_table(runtime, object_name)
+    place_object_on_table(runtime, object_name)
     controller = SimpleSceneController()
     waypoints = planner.plan(object_name=object_name, episode_index=episode_index, runtime=runtime) if isinstance(planner, CuroboSceneTrajectoryPlanner) else planner.plan(object_name=object_name, episode_index=episode_index)
     if not waypoints:
@@ -146,6 +104,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     actions: list[np.ndarray] = []
     objects: list[np.ndarray] = []
     timestamps: list[float] = []
+    grasp_states: list[bool] = []
+    attachment = KinematicObjectAttachment(runtime, object_name)
     image_dir = output_dir / f"episode_{episode_index:06d}"
     image_dir.mkdir(parents=True, exist_ok=True)
     sequence = 2
@@ -157,6 +117,19 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     for frame, (pose, trigger, grip, joint_waypoint) in enumerate(samples):
         packet = _packet(sequence, timestamp, pose, trigger, grip)
         command = controller.update(packet)
+        released_this_frame = False
+        grasp_requested = bool(
+            joint_waypoint.grasp if isinstance(joint_waypoint, JointWaypoint) else trigger > 0.5 and grip > 0.5
+        )
+        if grasp_requested and not attachment.attached:
+            # The grasp assist is explicit and deterministic: the planner
+            # owns the grasp phase, while the object follows the wrist once
+            # that phase begins instead of being numerically ejected by a
+            # contact-only finger closure.
+            attachment.try_attach(max_distance_m=0.18)
+        elif not grasp_requested and attachment.attached:
+            attachment.release()
+            released_this_frame = True
         if isinstance(joint_waypoint, JointWaypoint):
             # Keep the balance/WBC target alive while CuRobo overrides only
             # the planned arm joints.  Bypassing update_policy here leaves
@@ -176,12 +149,19 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         for _ in range(runtime._control_decimation):
             runtime._apply_pd()
             runtime._mujoco.mj_step(runtime.model, runtime.data)
+        if released_this_frame:
+            # Release onto the tabletop support plane so the final placement
+            # is not judged by an uncontrolled drop from the wrist.
+            place_object_on_table(runtime, object_name)
+        else:
+            attachment.update()
         state = np.array([runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names], dtype=np.float32)
         action = np.array([runtime._target_by_joint[name] for name in runtime._actuator_names], dtype=np.float32)
         states.append(state)
         actions.append(action)
         objects.append(_object_pose(runtime, object_name))
         timestamps.append(timestamp)
+        grasp_states.append(attachment.attached)
         if frame % max(1, image_stride) == 0:
             frame_rgb = _capture(renderer, runtime)
             Image.fromarray(frame_rgb).save(image_dir / f"{frame:06d}.jpg", quality=85)
@@ -202,7 +182,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         object_delta_xy >= 0.10
         and final_height_error <= 0.06
     )
-    success = bool(lifted and placed)
+    grasped = bool(any(grasp_states))
+    success = bool(grasped and lifted and placed)
     np.savez_compressed(
         output_dir / f"episode_{episode_index:06d}.npz",
         observation_state=np.asarray(states, dtype=np.float32),
@@ -213,6 +194,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         object_horizontal_displacement_m=np.asarray(object_delta_xy, dtype=np.float32),
         object_max_lift_m=np.asarray(max_lift, dtype=np.float32),
         object_final_height_error_m=np.asarray(final_height_error, dtype=np.float32),
+        grasp_state=np.asarray(grasp_states, dtype=np.bool_),
     )
     return {
         "success": success,
@@ -221,6 +203,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         "object_final_height_error_m": final_height_error,
         "lifted": lifted,
         "placed": placed,
+        "grasped": grasped,
     }
 
 

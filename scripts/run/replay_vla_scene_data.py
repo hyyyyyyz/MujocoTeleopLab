@@ -31,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from teleopit.scenes.runtime import SceneTeleopRuntime, scene_xml_path
+from teleopit.scenes.vla_datagen import KinematicObjectAttachment, place_object_on_table
 
 
 def _object_pose(runtime: SceneTeleopRuntime, object_name: str) -> np.ndarray:
@@ -98,6 +99,7 @@ def replay_episode(
         actions = np.asarray(archive["action"], dtype=np.float64)
         recorded_object = np.asarray(archive["object_pose"], dtype=np.float64)
         timestamps = np.asarray(archive["timestamp_s"], dtype=np.float64)
+        recorded_grasp = np.asarray(archive["grasp_state"], dtype=bool) if "grasp_state" in archive.files else None
     if recorded_state.ndim != 2 or recorded_state.shape[1] != 43:
         raise ValueError(f"observation_state must have shape [T, 43], got {recorded_state.shape}")
     if actions.shape != recorded_state.shape:
@@ -106,6 +108,8 @@ def replay_episode(
         raise ValueError(f"object_pose must have shape [T, 7], got {recorded_object.shape}")
     if timestamps.shape != (len(actions),) or not np.all(np.isfinite(timestamps)):
         raise ValueError("timestamp_s must be a finite vector matching episode length")
+    if recorded_grasp is not None and recorded_grasp.shape != (len(actions),):
+        raise ValueError(f"grasp_state must have shape [T], got {recorded_grasp.shape}")
     if not np.all(np.isfinite(actions)) or not np.all(np.isfinite(recorded_state)):
         raise ValueError("episode contains non-finite state/action values")
 
@@ -115,6 +119,7 @@ def replay_episode(
         object_name = scene
     runtime = SceneTeleopRuntime(scene_xml=scene_xml_path(scene if scene == "cube" else f"robosuite-{scene}"), input_timeout_s=1.0)
     runtime.reset()
+    place_object_on_table(runtime, object_name)
     try:
         import mujoco
 
@@ -125,12 +130,25 @@ def replay_episode(
     render_dir.mkdir(parents=True, exist_ok=True)
     replay_state: list[np.ndarray] = []
     replay_object: list[np.ndarray] = []
+    replay_grasp: list[bool] = []
+    attachment = KinematicObjectAttachment(runtime, object_name)
     rendered_frame = 0
     for frame, target in enumerate(actions):
+        grasp_requested = bool(recorded_grasp[frame]) if recorded_grasp is not None else bool(np.max(np.abs(target[-14:])) > 0.5)
+        released_this_frame = False
+        if not grasp_requested and attachment.attached:
+            attachment.release()
+            released_this_frame = True
         runtime._target_by_joint = dict(zip(runtime._actuator_names, target, strict=True))
         for _ in range(runtime._control_decimation):
             runtime._apply_pd()
             runtime._mujoco.mj_step(runtime.model, runtime.data)
+        if grasp_requested and not attachment.attached:
+            attachment.try_attach(max_distance_m=0.18)
+        if released_this_frame:
+            place_object_on_table(runtime, object_name)
+        else:
+            attachment.update()
         replay_state.append(
             np.asarray(
                 [runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names],
@@ -138,6 +156,7 @@ def replay_episode(
             )
         )
         replay_object.append(_object_pose(runtime, object_name).astype(np.float64))
+        replay_grasp.append(attachment.attached)
         if frame % image_stride == 0:
             # Keep rendered files contiguous so ffmpeg's image-sequence
             # demuxer does not stop at the first stride gap (000000, 000005,
@@ -160,6 +179,7 @@ def replay_episode(
         horizontal_displacement >= object_success_threshold
         and final_height_error <= object_final_height_tolerance
     )
+    grasped = bool(any(replay_grasp))
     report: dict[str, object] = {
         "format": "teleopit_scene_vla_replay_v2",
         "scene": scene,
@@ -176,7 +196,8 @@ def replay_episode(
         "object_final_height_error_m": final_height_error,
         "lifted": lifted,
         "placed": placed,
-        "success": bool(lifted and placed),
+        "grasped": grasped,
+        "success": bool(grasped and lifted and placed),
         "state_match": bool(np.max(state_error, initial=0.0) <= state_tolerance),
         "video": None,
     }
