@@ -559,6 +559,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                 if grasp_record is not None:
                     phase = phase_names[min(segment_index, len(phase_names) - 1)]
                     if phase != "release":
+                        phase = "lift" if phase == "transport" else phase
                         hand_target = tuple(float(value) for value in phase_hand[phase])
                 elif segment_index == 1:
                     hand_target = tuple(float(value) for value in close_hand)
