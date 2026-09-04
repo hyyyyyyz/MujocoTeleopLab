@@ -111,6 +111,8 @@ def replay_episode(
         recorded_object = np.asarray(archive["object_pose"], dtype=np.float64)
         timestamps = np.asarray(archive["timestamp_s"], dtype=np.float64)
         recorded_grasp = np.asarray(archive["grasp_state"], dtype=bool) if "grasp_state" in archive.files else None
+        initial_qpos = np.asarray(archive["initial_qpos"], dtype=np.float64) if "initial_qpos" in archive.files else None
+        initial_qvel = np.asarray(archive["initial_qvel"], dtype=np.float64) if "initial_qvel" in archive.files else None
     if recorded_state.ndim != 2 or recorded_state.shape[1] != 43:
         raise ValueError(f"observation_state must have shape [T, 43], got {recorded_state.shape}")
     if actions.shape != recorded_state.shape:
@@ -132,6 +134,18 @@ def replay_episode(
     runtime.reset()
     place_object_on_table(runtime, object_name)
     import mujoco
+
+    if initial_qpos is not None or initial_qvel is not None:
+        if initial_qpos is None or initial_qvel is None:
+            raise ValueError("episode must contain both initial_qpos and initial_qvel")
+        if initial_qpos.shape != runtime.data.qpos.shape or initial_qvel.shape != runtime.data.qvel.shape:
+            raise ValueError(
+                f"initial MuJoCo state shape mismatch: qpos={initial_qpos.shape}/{runtime.data.qpos.shape}, "
+                f"qvel={initial_qvel.shape}/{runtime.data.qvel.shape}"
+            )
+        runtime.data.qpos[:] = initial_qpos
+        runtime.data.qvel[:] = initial_qvel
+        mujoco.mj_forward(runtime.model, runtime.data)
 
     renderer = None
     if make_video or stream:
@@ -237,10 +251,9 @@ def replay_episode(
                 runtime._mujoco.mj_step(runtime.model, runtime.data)
             if grasp_requested and not attachment.attached:
                 attachment.try_attach(max_distance_m=0.18)
-            if released_this_frame:
-                place_object_on_table(runtime, object_name)
-            else:
-                attachment.update()
+            # The free object remains fully dynamic after release. Never snap
+            # it back to a nominal tabletop pose during replay.
+            attachment.update()
             replay_state.append(
                 np.asarray(
                     [runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names],

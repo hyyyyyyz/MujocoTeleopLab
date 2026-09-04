@@ -185,6 +185,12 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             runtime._mujoco.mj_step(runtime.model, runtime.data)
         sequence += 1
         timestamp += 1.0 / hz
+    # Replay must start exactly where the first recorded action starts. The
+    # neutral warm-up moves the robot away from the XML reset pose, and CuRobo
+    # episodes may also use a varied object placement. Persist the complete
+    # MuJoCo state at this boundary rather than asking replay to guess it.
+    initial_qpos = np.asarray(runtime.data.qpos, dtype=np.float64).copy()
+    initial_qvel = np.asarray(runtime.data.qvel, dtype=np.float64).copy()
     video_frame_index = 0
     if isinstance(waypoints[0], WristWaypoint):
         samples = ((pose, trigger, grip, None) for pose, trigger, grip in interpolate_waypoints(waypoints, hz=hz))
@@ -320,6 +326,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         object_max_lift_m=np.asarray(max_lift, dtype=np.float32),
         object_final_height_error_m=np.asarray(final_height_error, dtype=np.float32),
         grasp_state=np.asarray(grasp_states, dtype=np.bool_),
+        initial_qpos=initial_qpos,
+        initial_qvel=initial_qvel,
     )
     return {
         "success": success,
