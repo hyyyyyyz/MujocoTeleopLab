@@ -119,7 +119,12 @@ class KinematicObjectAttachment:
         self._attached = False
 
 
-def place_object_on_table(runtime: Any, object_name: str) -> None:
+def place_object_on_table(
+    runtime: Any,
+    object_name: str,
+    *,
+    offset_xy: tuple[float, float] = (0.0, 0.0),
+) -> None:
     """Place one free object onto the compiled scene's tabletop."""
     mujoco = runtime._mujoco
     model, data = runtime.model, runtime.data
@@ -148,8 +153,9 @@ def place_object_on_table(runtime: Any, object_name: str) -> None:
     table_half_extents = np.asarray(model.geom_size[table_geom], dtype=np.float64)
     object_half_extents = np.asarray(model.geom_size[collision_geom], dtype=np.float64)
     margin = 0.005
+    requested_xy = object_position[:2] + np.asarray(offset_xy, dtype=np.float64)
     object_position[:2] = np.clip(
-        object_position[:2],
+        requested_xy,
         table_center[:2] - table_half_extents[:2] + object_half_extents[:2] + margin,
         table_center[:2] + table_half_extents[:2] - object_half_extents[:2] - margin,
     )
@@ -368,6 +374,25 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         trajectory = position.detach().cpu().numpy()
         return trajectory, names
 
+    @staticmethod
+    def episode_variation(episode_index: int) -> dict[str, float]:
+        """Return bounded deterministic task variation for one episode.
+
+        The sequence is reproducible from the episode index, but uses a
+        low-discrepancy irrational phase rather than a five-value repeating
+        pattern.  All offsets stay comfortably inside the released tabletop.
+        """
+
+        phase = (float(episode_index) * 0.6180339887498949) % 1.0
+        phase2 = (float(episode_index) * 0.4142135623730950 + 0.17) % 1.0
+        return {
+            "object_dx": (phase - 0.5) * 0.12,
+            "object_dy": (phase2 - 0.5) * 0.08,
+            "lift": 0.08 + 0.10 * ((phase * 1.7) % 1.0),
+            "place_dx": 0.12 + 0.12 * ((phase2 * 1.3) % 1.0),
+            "place_dy": (phase * 0.8 % 1.0 - 0.4) * 0.12,
+        }
+
     def plan(self, *, object_name: str, episode_index: int, runtime: Any | None = None) -> tuple[JointWaypoint, ...]:
         runtime = runtime or self.runtime
         mujoco = runtime._mujoco
@@ -377,10 +402,12 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             raise RuntimeError(f"scene is missing object joint {joint_name!r}")
         object_qpos = int(runtime.model.jnt_qposadr[joint_id])
         object_pose = np.asarray(runtime.data.qpos[object_qpos : object_qpos + 7], dtype=np.float64)
+        variation = self.episode_variation(episode_index)
         target = object_pose[:3].copy()
-        target[2] += 0.10
+        target[2] += variation["lift"]
         place = target.copy()
-        place[0] += 0.16 + 0.015 * ((episode_index % 5) - 2)
+        place[0] += variation["place_dx"]
+        place[1] += variation["place_dy"]
         # The manipulated object is deliberately excluded from the static
         # collision world.  Keeping it as an obstacle makes the grasp pose
         # itself invalid, so CuRobo falls back to a nearby contact/push path;
@@ -388,7 +415,13 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         world = self._world(ignored_object_name=object_name)
         current = runtime._current_joint_positions()
         segments: list[tuple[np.ndarray, tuple[str, ...], float, float]] = []
-        for position, trigger, grip in ((target, 0.0, 0.0), (object_pose[:3], 1.0, 1.0), (target + np.array([0, 0, 0.15]), 1.0, 1.0), (place, 1.0, 1.0), (place, 0.0, 0.0)):
+        for position, trigger, grip in (
+            (target, 0.0, 0.0),
+            (object_pose[:3], 1.0, 1.0),
+            (target + np.array([0, 0, 0.15]), 1.0, 1.0),
+            (place, 1.0, 1.0),
+            (place, 0.0, 0.0),
+        ):
             relative_position, relative_quat = self._relative_pose(position, object_pose[3:7])
             trajectory, names = self._plan_segment(current, relative_position, relative_quat, world)
             segments.append((trajectory, names, trigger, grip))

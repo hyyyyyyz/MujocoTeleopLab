@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import time
 
@@ -77,9 +79,37 @@ def _capture(renderer: object, runtime: SceneTeleopRuntime) -> np.ndarray:
     return np.asarray(renderer.render(), dtype=np.uint8).copy()
 
 
-def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float) -> dict[str, object]:
+def _make_video(frame_dir: Path, video_path: Path, fps: float) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return False
+    try:
+        subprocess.run(
+            [
+                ffmpeg, "-y", "-loglevel", "error", "-framerate", str(fps),
+                "-i", str(frame_dir / "%06d.jpg"), "-c:v", "libx264",
+                "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+                str(video_path),
+            ],
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return video_path.is_file()
+
+
+def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float, video_width: int = 640, video_height: int = 360) -> dict[str, object]:
     runtime.reset()
-    place_object_on_table(runtime, object_name)
+    variation = (
+        planner.episode_variation(episode_index)
+        if isinstance(planner, CuroboSceneTrajectoryPlanner)
+        else {"object_dx": 0.0, "object_dy": 0.0}
+    )
+    place_object_on_table(
+        runtime,
+        object_name,
+        offset_xy=(variation["object_dx"], variation["object_dy"]),
+    )
     controller = SimpleSceneController()
     waypoints = planner.plan(object_name=object_name, episode_index=episode_index, runtime=runtime) if isinstance(planner, CuroboSceneTrajectoryPlanner) else planner.plan(object_name=object_name, episode_index=episode_index)
     if not waypoints:
@@ -96,7 +126,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     try:
         import mujoco
 
-        renderer = mujoco.Renderer(runtime.model, height=224, width=224)
+        renderer = mujoco.Renderer(runtime.model, height=video_height, width=video_width)
     except Exception as exc:
         raise RuntimeError("MuJoCo offscreen renderer is required for VLA image capture") from exc
 
@@ -110,6 +140,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     image_dir.mkdir(parents=True, exist_ok=True)
     sequence = 2
     timestamp = 1.0 / hz
+    video_frame_index = 0
     if isinstance(waypoints[0], WristWaypoint):
         samples = ((pose, trigger, grip, None) for pose, trigger, grip in interpolate_waypoints(waypoints, hz=hz))
     else:
@@ -164,10 +195,22 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         grasp_states.append(attachment.attached)
         if frame % max(1, image_stride) == 0:
             frame_rgb = _capture(renderer, runtime)
-            Image.fromarray(frame_rgb).save(image_dir / f"{frame:06d}.jpg", quality=85)
+            # Keep compact 224x224 training images while retaining every
+            # rendered frame in a separate high-quality video stream.
+            Image.fromarray(frame_rgb).resize((224, 224), Image.Resampling.BILINEAR).save(
+                image_dir / f"{frame:06d}.jpg", quality=85
+            )
+            video_frame_dir = output_dir / ".video_frames" / f"episode_{episode_index:06d}"
+            video_frame_dir.mkdir(parents=True, exist_ok=True)
+            Image.fromarray(frame_rgb).save(video_frame_dir / f"{video_frame_index:06d}.jpg", quality=92)
+            video_frame_index += 1
         sequence += 1
         timestamp += 1.0 / hz
     renderer.close()
+    video_frame_dir = output_dir / ".video_frames" / f"episode_{episode_index:06d}"
+    video_path = output_dir / f"episode_{episode_index:06d}.mp4"
+    video_ok = _make_video(video_frame_dir, video_path, fps=hz / max(1, image_stride))
+    shutil.rmtree(video_frame_dir, ignore_errors=True)
 
     object_positions = np.asarray(objects, dtype=np.float64)[:, :3]
     object_delta_xy = float(np.linalg.norm(object_positions[-1, :2] - object_positions[0, :2]))
@@ -204,6 +247,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         "lifted": lifted,
         "placed": placed,
         "grasped": grasped,
+        "video": str(video_path.name) if video_ok else None,
     }
 
 
@@ -215,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/vla_scene_data"))
     parser.add_argument("--hz", type=float, default=50.0)
     parser.add_argument("--image-stride", type=int, default=5)
+    parser.add_argument("--video-width", type=int, default=640)
+    parser.add_argument("--video-height", type=int, default=360)
     parser.add_argument(
         "--planner",
         choices=("curobo", "scripted"),
@@ -224,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.episodes <= 0 or args.hz <= 0 or args.image_stride <= 0:
         parser.error("episodes, hz and image-stride must be positive")
+    if args.video_width <= 0 or args.video_height <= 0 or args.video_width % 2 or args.video_height % 2:
+        parser.error("video dimensions must be positive even integers")
     if args.scene == "cube":
         object_name = "cube"
         xml = args.scene_xml.resolve() if args.scene_xml else scene_xml_path("cube")
@@ -254,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     with episodes_path.open("w", encoding="utf-8") as stream:
         for index in range(args.episodes):
             started = time.time()
-            metrics = generate_planned_episode(runtime, planner=planner, object_name=object_name, episode_index=index, output_dir=output_dir, image_stride=args.image_stride, hz=args.hz)
+            metrics = generate_planned_episode(runtime, planner=planner, object_name=object_name, episode_index=index, output_dir=output_dir, image_stride=args.image_stride, hz=args.hz, video_width=args.video_width, video_height=args.video_height)
             stream.write(json.dumps({
                 "episode_index": index,
                 "scene": args.scene,
