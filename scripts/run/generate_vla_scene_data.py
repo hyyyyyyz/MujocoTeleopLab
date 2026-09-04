@@ -162,7 +162,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             attachment.try_attach(max_distance_m=0.18)
             if not diagnostic_printed:
                 hand_id = __import__('mujoco').mj_name2id(runtime.model, __import__('mujoco').mjtObj.mjOBJ_BODY, 'right_wrist_yaw_link')
-            print('GRASP_DIAG pre_step hand=', runtime.data.xpos[hand_id].tolist(), 'object=', _object_pose(runtime, object_name)[:3].tolist(), 'hand_xmat=', runtime.data.xmat[hand_id].reshape(3,3).tolist(), 'contact=', attachment.attached, flush=True)
+                print('GRASP_DIAG pre_step hand=', runtime.data.xpos[hand_id].tolist(), 'object=', _object_pose(runtime, object_name)[:3].tolist(), 'hand_xmat=', runtime.data.xmat[hand_id].reshape(3,3).tolist(), 'contact=', attachment.attached, flush=True)
                 diagnostic_printed = True
         elif not grasp_requested and attachment.attached:
             attachment.release()
