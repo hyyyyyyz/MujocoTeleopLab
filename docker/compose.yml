@@ -19,9 +19,6 @@ services:
     working_dir: /workspace
     volumes:
       - ..:/workspace
-      # Keep the launcher in sync without forcing a full CUDA/PyTorch image
-      # rebuild when only container orchestration logic changes.
-      - ./entrypoint.sh:/usr/local/bin/mujoco-teleop-entrypoint:ro
       - ${HOME}/.cache/pip:/root/.cache/pip
       - ${HOME}/.cache/torch:/root/.cache/torch
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
@@ -36,6 +33,9 @@ services:
     ipc: host
     shm_size: 2gb
     network_mode: host
+    # Use the checked-out launcher directly; invoking bash avoids requiring
+    # the bind-mounted script to carry an executable mode bit.
+    entrypoint: ["/bin/bash", "/workspace/docker/entrypoint.sh"]
     stdin_open: true
     tty: true
     init: true
