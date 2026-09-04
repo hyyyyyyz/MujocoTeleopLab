@@ -51,6 +51,11 @@ def _render_frame(renderer: object, runtime: SceneTeleopRuntime, path: Path) -> 
     Image.fromarray(frame).save(path, quality=85)
 
 
+def _render_rgb(renderer: object, runtime: SceneTeleopRuntime) -> bytes:
+    renderer.update_scene(runtime.data, camera="scene_head_camera")
+    return np.ascontiguousarray(renderer.render(), dtype=np.uint8).tobytes()
+
+
 def _make_video(frame_dir: Path, video_path: Path, fps: float) -> bool:
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
@@ -92,6 +97,9 @@ def replay_episode(
     make_video: bool,
     interactive: bool = False,
     realtime: bool = False,
+    stream: bool = False,
+    stream_width: int = 640,
+    stream_height: int = 360,
 ) -> dict[str, object]:
     with np.load(episode_path, allow_pickle=False) as archive:
         required = {"observation_state", "action", "object_pose", "timestamp_s"}
@@ -126,13 +134,21 @@ def replay_episode(
     import mujoco
 
     renderer = None
-    if make_video:
+    if make_video or stream:
         try:
-            renderer = mujoco.Renderer(runtime.model, height=224, width=224)
+            renderer = mujoco.Renderer(
+                runtime.model,
+                height=stream_height if stream else 224,
+                width=stream_width if stream else 224,
+            )
         except Exception as exc:
             raise RuntimeError("MuJoCo offscreen renderer is required for replay rendering") from exc
 
     viewer = None
+    if interactive and stream:
+        if renderer is not None:
+            renderer.close()
+        raise ValueError("--interactive and --stream are mutually exclusive")
     if interactive:
         try:
             import mujoco.viewer
@@ -157,6 +173,54 @@ def replay_episode(
     replay_grasp: list[bool] = []
     attachment = KinematicObjectAttachment(runtime, object_name)
     rendered_frame = 0
+    stream_process = None
+    stream_stdout = None
+    original_stdout = sys.stdout
+    if stream:
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError("--stream requires ffmpeg in the container")
+        # Keep all Python/library diagnostics on stderr so stdout remains a
+        # clean MPEG-TS byte stream for the local ffplay process.
+        stream_stdout = getattr(original_stdout, "buffer", original_stdout)
+        sys.stdout = sys.stderr
+        stream_process = subprocess.Popen(
+            [
+                ffmpeg,
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-video_size",
+                f"{stream_width}x{stream_height}",
+                "-framerate",
+                str(hz),
+                "-i",
+                "-",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-tune",
+                "zerolatency",
+                "-pix_fmt",
+                "yuv420p",
+                "-f",
+                "mpegts",
+                "-muxdelay",
+                "0",
+                "-flush_packets",
+                "1",
+                "pipe:1",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=stream_stdout,
+            stderr=sys.stderr,
+            bufsize=0,
+        )
     wall_start = time.monotonic()
     try:
         for frame, target in enumerate(actions):
@@ -185,12 +249,15 @@ def replay_episode(
             )
             replay_object.append(_object_pose(runtime, object_name).astype(np.float64))
             replay_grasp.append(attachment.attached)
-            if renderer is not None and frame % image_stride == 0:
+            if make_video and renderer is not None and frame % image_stride == 0:
                 # Keep rendered files contiguous so ffmpeg's image-sequence
                 # demuxer does not stop at the first stride gap (000000, 000005,
                 # ... would otherwise produce a one-frame video).
                 _render_frame(renderer, runtime, render_dir / f"{rendered_frame:06d}.jpg")
                 rendered_frame += 1
+            if stream:
+                assert stream_process is not None and stream_process.stdin is not None
+                stream_process.stdin.write(_render_rgb(renderer, runtime))
             if viewer is not None:
                 viewer.sync()
             if realtime:
@@ -201,6 +268,12 @@ def replay_episode(
             viewer.close()
         if renderer is not None:
             renderer.close()
+        if stream_process is not None:
+            if stream_process.stdin is not None:
+                stream_process.stdin.close()
+            stream_process.wait(timeout=5.0)
+        if stream:
+            sys.stdout = original_stdout
 
     if not replay_state:
         raise RuntimeError("Interactive replay stopped before the first frame")
@@ -278,9 +351,20 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Pace interactive replay at --hz instead of running as fast as possible",
     )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream the first-person camera as low-latency H.264/MPEG-TS on stdout",
+    )
+    parser.add_argument("--stream-width", type=int, default=640)
+    parser.add_argument("--stream-height", type=int, default=360)
     args = parser.parse_args(argv)
-    if args.image_stride <= 0 or args.hz <= 0 or args.state_tolerance < 0 or args.object_success_threshold < 0 or args.object_lift_threshold < 0 or args.object_final_height_tolerance < 0:
+    if args.image_stride <= 0 or args.hz <= 0 or args.stream_width <= 0 or args.stream_height <= 0 or args.state_tolerance < 0 or args.object_success_threshold < 0 or args.object_lift_threshold < 0 or args.object_final_height_tolerance < 0:
         parser.error("image-stride and hz must be positive; tolerances must be non-negative")
+    if args.stream_width % 2 or args.stream_height % 2:
+        parser.error("stream-width and stream-height must be even")
+    if args.interactive and args.stream:
+        parser.error("--interactive and --stream are mutually exclusive")
     episode = args.episode if args.episode.is_absolute() else PROJECT_ROOT / args.episode
     if not episode.is_file():
         parser.error(f"episode does not exist: {episode}")
@@ -299,9 +383,12 @@ def main(argv: list[str] | None = None) -> int:
         object_final_height_tolerance=args.object_final_height_tolerance,
         make_video=not args.no_video and not args.interactive,
         interactive=args.interactive,
-        realtime=args.realtime or args.interactive,
+        realtime=args.realtime or args.interactive or args.stream,
+        stream=args.stream,
+        stream_width=args.stream_width,
+        stream_height=args.stream_height,
     )
-    print(json.dumps(report, indent=2))
+    print(json.dumps(report, indent=2), file=sys.stderr if args.stream else sys.stdout)
     return 0 if bool(report["success"]) and bool(report["state_match"]) else 2
 
 
