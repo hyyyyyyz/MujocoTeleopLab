@@ -21,7 +21,10 @@ fi
 echo "Starting XRoboToolkit PC Service..."
 (
   cd "$service_root"
-  exec ./runService.sh
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:$service_root:$service_root/lib:$service_root/SDK/x64"
+  export QT_PLUGIN_PATH="$service_root/plugins/:${QT_PLUGIN_PATH:-}"
+  export QT_QML_PATH="$service_root/qml/:${QT_QML_PATH:-}"
+  exec ./RoboticsServiceProcess
 ) >"$service_log" 2>&1 &
 service_pid=$!
 
