@@ -135,6 +135,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     objects: list[np.ndarray] = []
     timestamps: list[float] = []
     grasp_states: list[bool] = []
+    diagnostic_printed = False
     attachment = KinematicObjectAttachment(runtime, object_name)
     image_dir = output_dir / f"episode_{episode_index:06d}"
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -158,6 +159,10 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             # that phase begins instead of being numerically ejected by a
             # contact-only finger closure.
             attachment.try_attach(max_distance_m=0.18)
+            if not diagnostic_printed:
+                hand_id = __import__('mujoco').mj_name2id(runtime.model, __import__('mujoco').mjtObj.mjOBJ_BODY, 'right_wrist_yaw_link')
+                print('GRASP_DIAG pre_step hand=', runtime.data.xpos[hand_id].tolist(), 'object=', _object_pose(runtime, object_name)[:3].tolist(), 'contact=', attachment.attached, flush=True)
+                diagnostic_printed = True
         elif not grasp_requested and attachment.attached:
             attachment.release()
             released_this_frame = True
