@@ -404,11 +404,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         phase2 = (float(episode_index) * 0.4142135623730950 + 0.17) % 1.0
         return {
             "object_dx": (phase - 0.5) * 0.12,
-            # Keep the object in the right-hand workspace (negative Y for the
-            # released G1 model), then add bounded variation.  Center-table
-            # placement leaves the right wrist more than 10 cm off-axis and
-            # produces a side brush instead of the SIMPLE grasp approach.
-            "object_dy": -0.30 + (phase2 - 0.5) * 0.06,
+            "object_dy": (phase2 - 0.5) * 0.08,
             "lift": 0.08 + 0.10 * ((phase * 1.7) % 1.0),
             "place_dx": 0.12 + 0.12 * ((phase2 * 1.3) % 1.0),
             "place_dy": (phase * 0.8 % 1.0 - 0.4) * 0.12,
@@ -424,17 +420,9 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         object_qpos = int(runtime.model.jnt_qposadr[joint_id])
         object_pose = np.asarray(runtime.data.qpos[object_qpos : object_qpos + 7], dtype=np.float64)
         variation = self.episode_variation(episode_index)
-        # The released G1 hand geometry extends roughly +X from the palm to
-        # the finger pads.  CuRobo's EE link is the palm, so planning the palm
-        # at the object's center (the old implementation) put the fingers
-        # behind the object and produced a visual push rather than a grasp.
-        # Keep the object center as the task point and offset the palm behind
-        # it, matching SIMPLE's grasp-pose convention.
-        palm_offset = np.array([-0.11, 0.0, 0.0], dtype=np.float64)
         # Keep the object's stable orientation for the palm target.  The
         # activated-finger G1 model's wrist frame already includes the
-        # tabletop rotation; applying an additional pi flip sends the finger
-        # chain sideways and causes a push rather than an enclosing grasp.
+        # tabletop rotation.
         object_rotation = Rotation.from_quat(
             [object_pose[4], object_pose[5], object_pose[6], object_pose[3]]
         )
@@ -444,7 +432,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             [grasp_xyzw[3], grasp_xyzw[0], grasp_xyzw[1], grasp_xyzw[2]],
             dtype=np.float64,
         )
-        grasp = object_pose[:3] + palm_offset
+        grasp = object_pose[:3].copy()
         target = grasp.copy()
         target[2] += variation["lift"]
         place = target.copy()
@@ -523,8 +511,8 @@ class ScriptedPickPlacePlanner(SceneTrajectoryPlanner):
         # SIMPLE's Pico/controller frame has inverted Z: more negative input
         # raises the wrist.  The old -0.25 value therefore lowered the hand
         # after contact and only pushed the object across the tabletop.
-        lift = (x, y, -0.55, 0.0, 0.0, 0.0, 1.0)
-        place = (x + 0.16, y, -0.55, 0.0, 0.0, 0.0, 1.0)
+        lift = (x, y, -1.15, 0.0, 0.0, 0.0, 1.0)
+        place = (x + 0.16, y, -1.15, 0.0, 0.0, 0.0, 1.0)
         return (
             WristWaypoint(approach, duration_s=2.0),
             WristWaypoint(approach, trigger=1.0, grip=1.0, duration_s=2.0),
