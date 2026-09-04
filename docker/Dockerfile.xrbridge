@@ -44,7 +44,8 @@ RUN mkdir -p /opt/xrobotoolkit \
     && cp /opt/xrobotoolkit/service/opt/apps/roboticsservice/SDK/include/PXREARobotSDK.h /opt/xrobotoolkit/bindings/include/PXREARobotSDK.h \
     && cp /opt/xrobotoolkit/service/opt/apps/roboticsservice/SDK/x64/libPXREARobotSDK.so /opt/xrobotoolkit/bindings/lib/libPXREARobotSDK.so \
     && printf '%s\n' 'set_target_properties(xrobotoolkit_sdk PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")' >> /opt/xrobotoolkit/bindings/CMakeLists.txt \
-    && /opt/xrbridge-venv/bin/python -m pip install --no-build-isolation --force-reinstall /opt/xrobotoolkit/bindings \
+    && PYBIND_CMAKE=$(/opt/xrbridge-venv/bin/python -c 'import pybind11; print(pybind11.get_cmake_dir())') \
+    && CMAKE_PREFIX_PATH="$PYBIND_CMAKE" /opt/xrbridge-venv/bin/python -m pip install --no-build-isolation --force-reinstall /opt/xrobotoolkit/bindings \
     && cp /opt/xrobotoolkit/bindings/lib/libPXREARobotSDK.so /opt/xrbridge-venv/lib/python3.12/site-packages/ \
     && /opt/xrbridge-venv/bin/python -c 'import xrobotoolkit_sdk; print("xrobotoolkit_sdk OK")'
 
