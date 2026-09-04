@@ -404,7 +404,11 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         phase2 = (float(episode_index) * 0.4142135623730950 + 0.17) % 1.0
         return {
             "object_dx": (phase - 0.5) * 0.12,
-            "object_dy": (phase2 - 0.5) * 0.08,
+            # Keep the object in the right-hand workspace (negative Y for the
+            # released G1 model), then add bounded variation.  Center-table
+            # placement leaves the right wrist more than 10 cm off-axis and
+            # produces a side brush instead of the SIMPLE grasp approach.
+            "object_dy": -0.12 + (phase2 - 0.5) * 0.06,
             "lift": 0.08 + 0.10 * ((phase * 1.7) % 1.0),
             "place_dx": 0.12 + 0.12 * ((phase2 * 1.3) % 1.0),
             "place_dy": (phase * 0.8 % 1.0 - 0.4) * 0.12,
