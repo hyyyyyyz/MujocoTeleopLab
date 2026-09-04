@@ -31,7 +31,7 @@ COPY scripts/setup/patches ./scripts/setup/patches
 
 RUN python3.12 -m venv /opt/xrbridge-venv \
     && /opt/xrbridge-venv/bin/python -m pip install --upgrade pip setuptools wheel \
-    && /opt/xrbridge-venv/bin/python -m pip install numpy pybind11 \
+    && /opt/xrbridge-venv/bin/python -m pip install numpy scipy pybind11 \
     && /opt/xrbridge-venv/bin/python -m pip install --no-deps -e .
 
 RUN mkdir -p /opt/xrobotoolkit \
