@@ -193,23 +193,24 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         objects.append(_object_pose(runtime, object_name))
         timestamps.append(timestamp)
         grasp_states.append(attachment.attached)
+        # The MP4 is a smooth 50 Hz diagnostic recording.  Training images
+        # remain strided to keep the dataset compact, but video capture is
+        # deliberately independent of ``image_stride``.
+        frame_rgb = _capture(renderer, runtime)
         if frame % max(1, image_stride) == 0:
-            frame_rgb = _capture(renderer, runtime)
-            # Keep compact 224x224 training images while retaining every
-            # rendered frame in a separate high-quality video stream.
             Image.fromarray(frame_rgb).resize((224, 224), Image.Resampling.BILINEAR).save(
                 image_dir / f"{frame:06d}.jpg", quality=85
             )
-            video_frame_dir = output_dir / ".video_frames" / f"episode_{episode_index:06d}"
-            video_frame_dir.mkdir(parents=True, exist_ok=True)
-            Image.fromarray(frame_rgb).save(video_frame_dir / f"{video_frame_index:06d}.jpg", quality=92)
-            video_frame_index += 1
+        video_frame_dir = output_dir / ".video_frames" / f"episode_{episode_index:06d}"
+        video_frame_dir.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(frame_rgb).save(video_frame_dir / f"{video_frame_index:06d}.jpg", quality=92)
+        video_frame_index += 1
         sequence += 1
         timestamp += 1.0 / hz
     renderer.close()
     video_frame_dir = output_dir / ".video_frames" / f"episode_{episode_index:06d}"
     video_path = output_dir / f"episode_{episode_index:06d}.mp4"
-    video_ok = _make_video(video_frame_dir, video_path, fps=hz / max(1, image_stride))
+    video_ok = _make_video(video_frame_dir, video_path, fps=hz)
     shutil.rmtree(video_frame_dir, ignore_errors=True)
 
     object_positions = np.asarray(objects, dtype=np.float64)[:, :3]
