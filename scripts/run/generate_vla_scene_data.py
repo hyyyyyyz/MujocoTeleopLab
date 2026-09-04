@@ -167,6 +167,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     objects: list[np.ndarray] = []
     timestamps: list[float] = []
     grasp_states: list[bool] = []
+    failure_reason: str | None = None
+    grasp_phase_frames = 0
     attachment = KinematicObjectAttachment(runtime, object_name)
     image_dir = output_dir / f"episode_{episode_index:06d}"
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -200,9 +202,18 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             # that phase begins instead of being numerically ejected by a
             # contact-only finger closure.
             attachment.try_attach(max_distance_m=0.18)
+            grasp_phase_frames += 1
+            # A planner may spend a short settling interval closing the
+            # fingers, but it must never proceed to lift without contact.
+            if grasp_phase_frames > max(1, int(round(hz * 1.0))) and not attachment.attached:
+                failure_reason = "no_finger_object_contact_before_lift"
+                break
         elif not grasp_requested and attachment.attached:
             attachment.release()
             released_this_frame = True
+            grasp_phase_frames = 0
+        elif not grasp_requested:
+            grasp_phase_frames = 0
         if isinstance(joint_waypoint, JointWaypoint):
             # Keep the balance/WBC target alive while CuRobo overrides only
             # the planned arm joints.  Bypassing update_policy here leaves
@@ -242,6 +253,9 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             pass
         else:
             attachment.update()
+            if grasp_requested and not attachment.attached:
+                failure_reason = "finger_object_contact_lost"
+                break
         state = np.array([runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names], dtype=np.float32)
         action = np.array([runtime._target_by_joint[name] for name in runtime._actuator_names], dtype=np.float32)
         states.append(state)
@@ -269,6 +283,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     video_ok = _make_video(video_frame_dir, video_path, fps=hz)
     shutil.rmtree(video_frame_dir, ignore_errors=True)
 
+    if not objects:
+        raise RuntimeError("planner produced no executable frames")
     object_positions = np.asarray(objects, dtype=np.float64)[:, :3]
     object_delta_xy = float(np.linalg.norm(object_positions[-1, :2] - object_positions[0, :2]))
     initial_z = float(object_positions[0, 2])
@@ -284,6 +300,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     )
     grasped = bool(any(grasp_states))
     success = bool(grasped and lifted and placed)
+    if not success and failure_reason is None:
+        failure_reason = "object_motion_predicate_failed"
     np.savez_compressed(
         output_dir / f"episode_{episode_index:06d}.npz",
         observation_state=np.asarray(states, dtype=np.float32),
@@ -304,6 +322,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         "lifted": lifted,
         "placed": placed,
         "grasped": grasped,
+        "failure_reason": failure_reason,
         "video": str(video_path.name) if video_ok else None,
     }
 
