@@ -35,6 +35,8 @@ class JointWaypoint:
     grip: float = 0.0
     duration_s: float = 0.05
     grasp: bool = False
+    phase: str = "move"
+    right_hand_positions: tuple[float, ...] | None = None
 
 
 class KinematicObjectAttachment:
@@ -62,7 +64,14 @@ class KinematicObjectAttachment:
         self._hand_body_id = int(body_id)
         self._finger_body_ids = tuple(
             int(candidate)
-            for name in ("right_hand_index_1_link", "right_hand_middle_1_link", "right_hand_thumb_2_link")
+            for name in (
+                "left_hand_index_1_link",
+                "left_hand_middle_1_link",
+                "left_hand_thumb_2_link",
+                "right_hand_index_1_link",
+                "right_hand_middle_1_link",
+                "right_hand_thumb_2_link",
+            )
             if (candidate := mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)) >= 0
         )
         self._object_geom_ids = tuple(
@@ -457,8 +466,24 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             segments.append((trajectory, names, trigger, grip))
             current.update(dict(zip(names, trajectory[-1], strict=True)))
         waypoints: list[JointWaypoint] = []
+        # SIMPLE does not hold one binary close pose.  After reaching the
+        # grasp it adds a 20-sample Dex3 squeeze stroke, then preserves that
+        # stronger posture through lift and transport.  Use the same released
+        # direction convention in this scene's joint order.
+        close_hand = np.asarray(
+            [0.02331954, -0.02398408, -0.22170663, 0.25662386, 1.3371105, 0.3085137, 0.9805285],
+            dtype=np.float64,
+        )
+        squeeze_direction = np.asarray([0.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float64)
+        squeeze_hand = close_hand + 0.2 * squeeze_direction
+        phase_names = ("pregrasp", "grasp", "lift", "transport", "release")
         for segment_index, (trajectory, names, trigger, grip) in enumerate(segments):
             for row in trajectory:
+                hand_target = None
+                if segment_index == 1:
+                    hand_target = tuple(float(value) for value in close_hand)
+                elif segment_index in (2, 3):
+                    hand_target = tuple(float(value) for value in squeeze_hand)
                 waypoints.append(
                     JointWaypoint(
                         dict(zip(names, row, strict=True)),
@@ -467,6 +492,8 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                         grip,
                         self._interpolation_dt,
                         grasp=segment_index in (1, 2, 3),
+                        phase=phase_names[segment_index],
+                        right_hand_positions=hand_target,
                     )
                 )
             # SIMPLE inserts an explicit close/squeeze phase between the
@@ -477,7 +504,9 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             # MuJoCo resolves finger-object contact and friction.
             if segment_index == 1 and trajectory.size:
                 final_row = trajectory[-1]
-                for _ in range(25):
+                for squeeze_index in range(25):
+                    ratio = min(1.0, float(squeeze_index + 1) / 20.0)
+                    hand_target = close_hand + ratio * 0.2 * squeeze_direction
                     waypoints.append(
                         JointWaypoint(
                             dict(zip(names, final_row, strict=True)),
@@ -486,6 +515,8 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                             grip,
                             self._interpolation_dt,
                             grasp=True,
+                            phase="squeeze",
+                            right_hand_positions=tuple(float(value) for value in hand_target),
                         )
                     )
         return tuple(waypoints)

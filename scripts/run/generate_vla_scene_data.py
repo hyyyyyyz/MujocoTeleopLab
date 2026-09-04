@@ -168,7 +168,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     timestamps: list[float] = []
     grasp_states: list[bool] = []
     failure_reason: str | None = None
-    grasp_phase_frames = 0
+    contact_loss_frames = 0
+    previous_phase: str | None = None
     attachment = KinematicObjectAttachment(runtime, object_name)
     image_dir = output_dir / f"episode_{episode_index:06d}"
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -196,24 +197,23 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         grasp_requested = bool(
             joint_waypoint.grasp if isinstance(joint_waypoint, JointWaypoint) else trigger > 0.5 and grip > 0.5
         )
-        if grasp_requested and not attachment.attached:
-            # The grasp assist is explicit and deterministic: the planner
-            # owns the grasp phase, while the object follows the wrist once
-            # that phase begins instead of being numerically ejected by a
-            # contact-only finger closure.
-            attachment.try_attach(max_distance_m=0.18)
-            grasp_phase_frames += 1
-            # A planner may spend a short settling interval closing the
-            # fingers, but it must never proceed to lift without contact.
-            if grasp_phase_frames > max(1, int(round(hz * 1.0))) and not attachment.attached:
+        phase = joint_waypoint.phase if isinstance(joint_waypoint, JointWaypoint) else "scripted"
+        if phase in ("lift", "transport") and previous_phase not in ("lift", "transport"):
+            if not attachment.ever_contacted:
                 failure_reason = "no_finger_object_contact_before_lift"
                 break
+        previous_phase = phase
+        if grasp_requested and not attachment.attached:
+            # This is detection only: the object remains a free MuJoCo body.
+            # The planner owns the close/squeeze phase, while attachment state
+            # records whether real contact has actually occurred.
+            attachment.try_attach(max_distance_m=0.18)
         elif not grasp_requested and attachment.attached:
             attachment.release()
             released_this_frame = True
-            grasp_phase_frames = 0
+            contact_loss_frames = 0
         elif not grasp_requested:
-            grasp_phase_frames = 0
+            contact_loss_frames = 0
         if isinstance(joint_waypoint, JointWaypoint):
             # Keep the balance/WBC target alive while CuRobo overrides only
             # the planned arm joints.  Bypassing update_policy here leaves
@@ -224,14 +224,14 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             # CuRobo's URDF intentionally plans the 10-DOF waist/right-arm
             # chain.  Apply the controller-compatible Dex3 finger IK for the
             # trigger/grip state separately so the object is actually held.
-            # SIMPLE's MP agent uses the robot EEF controller's calibrated
-            # close pose during the grasp/lift/place phases.  Sparse Pico
-            # fingertip gestures are appropriate for teleop, but are not a
-            # deterministic pinch for scripted data generation; they let the
-            # cube slip or tip.  Use the released Dex3 close pose only while
-            # a JointWaypoint explicitly requests a grasp, and retain IK for
-            # the open/approach frames.
-            if joint_waypoint.grasp:
+            # SIMPLE's MP agent closes and then adds a directional Dex3
+            # squeeze stroke before lift. Sparse Pico fingertip gestures are
+            # appropriate for teleop, but are not a deterministic pinch for
+            # scripted data generation. Joint waypoints therefore carry the
+            # planned hand posture; open/approach frames retain regular IK.
+            if joint_waypoint.right_hand_positions is not None:
+                right_hand_q = np.asarray(joint_waypoint.right_hand_positions, dtype=np.float64)
+            elif joint_waypoint.grasp:
                 right_hand_q = np.asarray(
                     [0.02331954, -0.02398408, -0.22170663, 0.25662386, 1.3371105, 0.3085137, 0.9805285],
                     dtype=np.float64,
@@ -253,7 +253,14 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             pass
         else:
             attachment.update()
-            if grasp_requested and not attachment.attached:
+            if grasp_requested and phase in ("lift", "transport") and not attachment.attached:
+                contact_loss_frames += 1
+            else:
+                contact_loss_frames = 0
+            # MuJoCo contact manifolds can disappear for one or two frames
+            # while the object rolls between fingertips.  Treat only a
+            # sustained 0.2 s loss during lift/transport as a dropped object.
+            if contact_loss_frames >= max(1, int(round(hz * 0.2))):
                 failure_reason = "finger_object_contact_lost"
                 break
         state = np.array([runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names], dtype=np.float32)
