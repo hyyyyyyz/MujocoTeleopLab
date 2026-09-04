@@ -22,6 +22,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import numpy as np
 from PIL import Image
@@ -89,6 +90,8 @@ def replay_episode(
     object_lift_threshold: float,
     object_final_height_tolerance: float,
     make_video: bool,
+    interactive: bool = False,
+    realtime: bool = False,
 ) -> dict[str, object]:
     with np.load(episode_path, allow_pickle=False) as archive:
         required = {"observation_state", "action", "object_pose", "timestamp_s"}
@@ -120,12 +123,33 @@ def replay_episode(
     runtime = SceneTeleopRuntime(scene_xml=scene_xml_path(scene if scene == "cube" else f"robosuite-{scene}"), input_timeout_s=1.0)
     runtime.reset()
     place_object_on_table(runtime, object_name)
-    try:
-        import mujoco
+    import mujoco
 
-        renderer = mujoco.Renderer(runtime.model, height=224, width=224)
-    except Exception as exc:
-        raise RuntimeError("MuJoCo offscreen renderer is required for replay rendering") from exc
+    renderer = None
+    if make_video:
+        try:
+            renderer = mujoco.Renderer(runtime.model, height=224, width=224)
+        except Exception as exc:
+            raise RuntimeError("MuJoCo offscreen renderer is required for replay rendering") from exc
+
+    viewer = None
+    if interactive:
+        try:
+            import mujoco.viewer
+
+            viewer = mujoco.viewer.launch_passive(runtime.model, runtime.data)
+            with viewer.lock():
+                viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+                viewer.cam.fixedcamid = runtime.model.camera("scene_head_camera").id
+                viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = 1
+                viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = 1
+        except Exception as exc:
+            if renderer is not None:
+                renderer.close()
+            raise RuntimeError(
+                "Interactive replay requires a MuJoCo GLFW/X11 display. "
+                "Use ssh -Y and pass DISPLAY/XAUTHORITY into the container."
+            ) from exc
 
     render_dir.mkdir(parents=True, exist_ok=True)
     replay_state: list[np.ndarray] = []
@@ -133,42 +157,61 @@ def replay_episode(
     replay_grasp: list[bool] = []
     attachment = KinematicObjectAttachment(runtime, object_name)
     rendered_frame = 0
-    for frame, target in enumerate(actions):
-        grasp_requested = bool(recorded_grasp[frame]) if recorded_grasp is not None else bool(np.max(np.abs(target[-14:])) > 0.5)
-        released_this_frame = False
-        if not grasp_requested and attachment.attached:
-            attachment.release()
-            released_this_frame = True
-        runtime._target_by_joint = dict(zip(runtime._actuator_names, target, strict=True))
-        for _ in range(runtime._control_decimation):
-            runtime._apply_pd()
-            runtime._mujoco.mj_step(runtime.model, runtime.data)
-        if grasp_requested and not attachment.attached:
-            attachment.try_attach(max_distance_m=0.18)
-        if released_this_frame:
-            place_object_on_table(runtime, object_name)
-        else:
-            attachment.update()
-        replay_state.append(
-            np.asarray(
-                [runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names],
-                dtype=np.float64,
+    wall_start = time.monotonic()
+    try:
+        for frame, target in enumerate(actions):
+            if viewer is not None and not viewer.is_running():
+                break
+            grasp_requested = bool(recorded_grasp[frame]) if recorded_grasp is not None else bool(np.max(np.abs(target[-14:])) > 0.5)
+            released_this_frame = False
+            if not grasp_requested and attachment.attached:
+                attachment.release()
+                released_this_frame = True
+            runtime._target_by_joint = dict(zip(runtime._actuator_names, target, strict=True))
+            for _ in range(runtime._control_decimation):
+                runtime._apply_pd()
+                runtime._mujoco.mj_step(runtime.model, runtime.data)
+            if grasp_requested and not attachment.attached:
+                attachment.try_attach(max_distance_m=0.18)
+            if released_this_frame:
+                place_object_on_table(runtime, object_name)
+            else:
+                attachment.update()
+            replay_state.append(
+                np.asarray(
+                    [runtime.data.qpos[runtime._qpos_adr[name]] for name in runtime._actuator_names],
+                    dtype=np.float64,
+                )
             )
-        )
-        replay_object.append(_object_pose(runtime, object_name).astype(np.float64))
-        replay_grasp.append(attachment.attached)
-        if frame % image_stride == 0:
-            # Keep rendered files contiguous so ffmpeg's image-sequence
-            # demuxer does not stop at the first stride gap (000000, 000005,
-            # ... would otherwise produce a one-frame video).
-            _render_frame(renderer, runtime, render_dir / f"{rendered_frame:06d}.jpg")
-            rendered_frame += 1
-    renderer.close()
+            replay_object.append(_object_pose(runtime, object_name).astype(np.float64))
+            replay_grasp.append(attachment.attached)
+            if renderer is not None and frame % image_stride == 0:
+                # Keep rendered files contiguous so ffmpeg's image-sequence
+                # demuxer does not stop at the first stride gap (000000, 000005,
+                # ... would otherwise produce a one-frame video).
+                _render_frame(renderer, runtime, render_dir / f"{rendered_frame:06d}.jpg")
+                rendered_frame += 1
+            if viewer is not None:
+                viewer.sync()
+            if realtime:
+                deadline = wall_start + (frame + 1) / hz
+                time.sleep(max(0.0, deadline - time.monotonic()))
+    finally:
+        if viewer is not None:
+            viewer.close()
+        if renderer is not None:
+            renderer.close()
+
+    if not replay_state:
+        raise RuntimeError("Interactive replay stopped before the first frame")
 
     replay_state_array = np.asarray(replay_state)
     replay_object_array = np.asarray(replay_object)
-    state_error = np.abs(replay_state_array - recorded_state)
-    object_error = np.linalg.norm(replay_object_array[:, :3] - recorded_object[:, :3], axis=1)
+    replay_frames = len(replay_state_array)
+    state_error = np.abs(replay_state_array - recorded_state[:replay_frames])
+    object_error = np.linalg.norm(
+        replay_object_array[:, :3] - recorded_object[:replay_frames, :3], axis=1
+    )
     object_positions = replay_object_array[:, :3]
     horizontal_displacement = float(np.linalg.norm(object_positions[-1, :2] - object_positions[0, :2]))
     initial_height = float(object_positions[0, 2])
@@ -184,7 +227,8 @@ def replay_episode(
         "format": "teleopit_scene_vla_replay_v2",
         "scene": scene,
         "episode": str(episode_path),
-        "frames": int(len(actions)),
+        "frames": int(replay_frames),
+        "completed": bool(replay_frames == len(actions)),
         "control_hz": hz,
         "image_stride": image_stride,
         "state_max_abs_error": float(np.max(state_error, initial=0.0)),
@@ -198,7 +242,10 @@ def replay_episode(
         "placed": placed,
         "grasped": grasped,
         "success": bool(grasped and lifted and placed),
-        "state_match": bool(np.max(state_error, initial=0.0) <= state_tolerance),
+        "state_match": bool(
+            replay_frames == len(actions)
+            and np.max(state_error, initial=0.0) <= state_tolerance
+        ),
         "video": None,
     }
     if make_video:
@@ -221,6 +268,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--object-lift-threshold", type=float, default=0.03)
     parser.add_argument("--object-final-height-tolerance", type=float, default=0.06)
     parser.add_argument("--no-video", action="store_true")
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Open a live MuJoCo first-person viewer using scene_head_camera",
+    )
+    parser.add_argument(
+        "--realtime",
+        action="store_true",
+        help="Pace interactive replay at --hz instead of running as fast as possible",
+    )
     args = parser.parse_args(argv)
     if args.image_stride <= 0 or args.hz <= 0 or args.state_tolerance < 0 or args.object_success_threshold < 0 or args.object_lift_threshold < 0 or args.object_final_height_tolerance < 0:
         parser.error("image-stride and hz must be positive; tolerances must be non-negative")
@@ -240,7 +297,9 @@ def main(argv: list[str] | None = None) -> int:
         object_success_threshold=args.object_success_threshold,
         object_lift_threshold=args.object_lift_threshold,
         object_final_height_tolerance=args.object_final_height_tolerance,
-        make_video=not args.no_video,
+        make_video=not args.no_video and not args.interactive,
+        interactive=args.interactive,
+        realtime=args.realtime or args.interactive,
     )
     print(json.dumps(report, indent=2))
     return 0 if bool(report["success"]) and bool(report["state_match"]) else 2
