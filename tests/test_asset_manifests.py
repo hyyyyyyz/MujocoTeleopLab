@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.dev.validate_asset_manifests import validate_catalog, validate_manifest
 from scripts.setup.download_scene_object import OBJECTS
 from teleopit.scenes.vla_datagen import CuroboSceneTrajectoryPlanner, ScriptedPickPlacePlanner, interpolate_waypoints
+from teleopit.scenes.grasp_assets import load_simple_bodex
 
 
 def test_asset_catalog_metadata_is_valid_on_clean_checkout() -> None:
@@ -88,3 +89,22 @@ def test_curobo_backend_fails_explicitly_without_cuda_dependency() -> None:
     # required planner contract and remains a distinct backend.
     assert issubclass(CuroboSceneTrajectoryPlanner, object)
     assert "collision" in CuroboSceneTrajectoryPlanner.__doc__.lower()
+
+
+def test_simple_bodex_loader_maps_robot_pose_phases(tmp_path: Path) -> None:
+    names = ("wrist", "thumb", "index")
+    payload = {"robot_pose": np.asarray([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0], [6.0, 7.0, 8.0], [9.0, 10.0, 11.0]])}
+    path = tmp_path / "grasp.npy"
+    np.save(path, payload, allow_pickle=True)
+    record = load_simple_bodex(path, source_joint_names=names)
+    assert record.pregrasp == {"wrist": 0.0, "thumb": 1.0, "index": 2.0}
+    assert record.grasp["wrist"] == 3.0
+    assert record.squeeze["index"] == 8.0
+    assert record.lift["thumb"] == 10.0
+
+
+def test_simple_bodex_loader_rejects_missing_phase_or_joint(tmp_path: Path) -> None:
+    path = tmp_path / "grasp.npz"
+    np.savez(path, pregrasp=np.zeros(2), grasp=np.zeros(2), squeeze=np.zeros(2))
+    with np.testing.assert_raises(ValueError):
+        load_simple_bodex(path, source_joint_names=("a", "b"))

@@ -1,0 +1,50 @@
+schema_version: 1
+kind: grasp_sources
+description: >-
+  External grasp sources used by optional adapters. Heavy grasp data is never
+  committed here; users must obtain it under the upstream license and point the
+  runtime at the local path.
+assets:
+  - id: simple.bodex.external.v1
+    display_name: SIMPLE Bodex/Dex3 phase cache
+    version: 1
+    format: simple_robot_pose_npy
+    expected_phases: [pregrasp, grasp, squeeze, lift]
+    source:
+      type: git-and-external-data
+      uri: https://github.com/physical-superintelligence-lab/SIMPLE
+      revision: main
+      data_path: data/assets/graspnet/dex_grasp/<hand_uid>/<object_uid>/
+    license:
+      spdx: UNKNOWN
+      redistribution: prohibited_until_upstream_data_license_review
+      local_use: verify_with_upstream
+    tracked: false
+
+  - id: graspnet1b.external.v1
+    display_name: GraspNet-1B parallel-gripper candidates
+    version: 1
+    format: graspnet
+    source:
+      type: git-and-external-data
+      uri: https://github.com/graspnet/graspnet-baseline
+      revision: main
+    license:
+      spdx: LicenseRef-GraspNet-Academic-NonCommercial
+      redistribution: prohibited
+      local_use: academic_noncommercial_research_only
+    tracked: false
+
+  - id: dexgraspnet.external.v1
+    display_name: DexGraspNet research dexterous grasps
+    version: 1
+    format: dexgraspnet
+    source:
+      type: git-and-external-data
+      uri: https://github.com/PKU-EPIC/DexGraspNet
+      revision: main
+    license:
+      spdx: UNKNOWN
+      redistribution: prohibited_until_upstream_data_license_review
+      local_use: verify_with_upstream
+    tracked: false
