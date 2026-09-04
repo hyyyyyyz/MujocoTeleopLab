@@ -478,6 +478,25 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                         grasp=segment_index in (1, 2, 3),
                     )
                 )
+            # SIMPLE inserts an explicit close/squeeze phase between the
+            # approach and lift plans (ten control actions before continuing).
+            # CuRobo returns only arm samples, so without this dwell the Dex3
+            # fingers are still closing when the lift segment starts and the
+            # dynamic object slips.  Hold the grasp target for ~0.5 s while
+            # MuJoCo resolves finger-object contact and friction.
+            if segment_index == 1 and trajectory.size:
+                final_row = trajectory[-1]
+                for _ in range(25):
+                    waypoints.append(
+                        JointWaypoint(
+                            dict(zip(names, final_row, strict=True)),
+                            (0.0, 0.0, -0.3, 0.0, 0.0, 0.0, 1.0),
+                            trigger,
+                            grip,
+                            self._interpolation_dt,
+                            grasp=True,
+                        )
+                    )
         return tuple(waypoints)
 
 
