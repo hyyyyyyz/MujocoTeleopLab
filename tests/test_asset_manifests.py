@@ -103,6 +103,17 @@ def test_simple_bodex_loader_maps_robot_pose_phases(tmp_path: Path) -> None:
     assert record.lift["thumb"] == 10.0
 
 
+def test_simple_bodex_loader_infers_joint_names_from_batched_export(tmp_path: Path) -> None:
+    path = tmp_path / "batched.npy"
+    payload = {
+        "robot_pose": np.arange(4 * 3, dtype=np.float32).reshape(1, 4, 3),
+        "joint_names": ["a", "b", "c", "unused"],
+    }
+    np.save(path, payload, allow_pickle=True)
+    record = load_simple_bodex(path)
+    assert record.grasp == {"a": 3.0, "b": 4.0, "c": 5.0}
+
+
 def test_simple_bodex_loader_rejects_missing_phase_or_joint(tmp_path: Path) -> None:
     path = tmp_path / "grasp.npz"
     np.savez(path, pregrasp=np.zeros(2), grasp=np.zeros(2), squeeze=np.zeros(2))

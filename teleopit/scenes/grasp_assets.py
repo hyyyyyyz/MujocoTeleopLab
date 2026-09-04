@@ -77,7 +77,7 @@ def _named(vector: np.ndarray, names: Sequence[str], *, phase: str, path: Path) 
 def load_simple_bodex(
     path: str | Path,
     *,
-    source_joint_names: Sequence[str],
+    source_joint_names: Sequence[str] | None = None,
     target_joint_names: Sequence[str] | None = None,
     hand_permutation: Sequence[int] | None = None,
 ) -> DexGraspRecord:
@@ -94,7 +94,22 @@ def load_simple_bodex(
     robot_pose = payload.get("robot_pose")
     if robot_pose is not None:
         poses = np.asarray(robot_pose, dtype=np.float64)
-        if poses.ndim < 2 or poses.shape[0] == 0 or poses.shape[-1] != len(source_joint_names):
+        if poses.ndim < 2 or poses.shape[0] == 0:
+            raise ValueError(f"robot_pose must be a non-empty pose array, got {poses.shape}: {asset_path}")
+        # SIMPLE exports a leading batch dimension, commonly [1, T, D].
+        # Collapse all leading dimensions while retaining the time and joint
+        # axes, so both [T, D] and [1, T, D] caches are accepted.
+        if poses.ndim > 2:
+            poses = poses.reshape((-1, poses.shape[-2], poses.shape[-1]))[0]
+        if source_joint_names is None:
+            inferred = payload.get("joint_names")
+            if not isinstance(inferred, (list, tuple)):
+                raise ValueError(
+                    "source_joint_names is required when the Bodex file has no joint_names list: "
+                    f"{asset_path}"
+                )
+            source_joint_names = tuple(str(name) for name in inferred[: poses.shape[-1]])
+        if poses.shape[-1] != len(source_joint_names):
             raise ValueError(
                 f"robot_pose must have shape [N, {len(source_joint_names)}], got {poses.shape}: {asset_path}"
             )
@@ -115,6 +130,8 @@ def load_simple_bodex(
             raise ValueError("hand_permutation must be a permutation of all source joint indices")
         vectors = {phase: vector[permutation] for phase, vector in vectors.items()}
 
+    if source_joint_names is None:
+        raise ValueError("source_joint_names could not be inferred")
     names = tuple(str(name) for name in source_joint_names)
     records = {phase: _named(vector, names, phase=phase, path=asset_path) for phase, vector in vectors.items()}
     if target_joint_names is not None:
