@@ -235,6 +235,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
             # appropriate for teleop, but are not a deterministic pinch for
             # scripted data generation. Joint waypoints therefore carry the
             # planned hand posture; open/approach frames retain regular IK.
+            left_hand_q = runtime._retargeting_ik.left_hand_ik_solver(command.left_fingers)
             if joint_waypoint.right_hand_positions is not None:
                 right_hand_q = np.asarray(joint_waypoint.right_hand_positions, dtype=np.float64)
             elif joint_waypoint.grasp:
@@ -242,10 +243,8 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
                     [0.02331954, -0.02398408, -0.22170663, 0.25662386, 1.3371105, 0.3085137, 0.9805285],
                     dtype=np.float64,
                 )
-                left_hand_q = np.zeros(len(runtime._left_hand_joint_names), dtype=np.float64)
             else:
                 right_hand_q = runtime._retargeting_ik.right_hand_ik_solver(command.right_fingers)
-                left_hand_q = runtime._retargeting_ik.left_hand_ik_solver(command.left_fingers)
             runtime._target_by_joint.update(dict(zip(runtime._right_hand_joint_names, right_hand_q, strict=True)))
             runtime._target_by_joint.update(dict(zip(runtime._left_hand_joint_names, left_hand_q, strict=True)))
         else:
