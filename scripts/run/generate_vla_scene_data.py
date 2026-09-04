@@ -75,8 +75,53 @@ def _capture(renderer: object, runtime: SceneTeleopRuntime) -> np.ndarray:
     return np.asarray(renderer.render(), dtype=np.uint8).copy()
 
 
+def _place_object_on_table(runtime: SceneTeleopRuntime, object_name: str) -> None:
+    """Deterministically reset the manipulated object onto the tabletop.
+
+    Older generated scene XMLs placed robosuite objects at z=0.9 regardless
+    of their size, leaving them suspended above the table.  Set only the free
+    joint's initial z and velocity here so old assets remain usable while the
+    asset builder is corrected for future scenes.
+    """
+    mujoco = runtime._mujoco
+    model, data = runtime.model, runtime.data
+    joint_name = "cube_joint" if object_name == "cube" else f"robosuite_{object_name}_free"
+    joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+    if joint_id < 0:
+        raise ValueError(f"scene is missing object free joint {joint_name!r}")
+    object_body = int(model.jnt_bodyid[joint_id])
+    object_geom_ids = [
+        geom_id for geom_id in range(model.ngeom) if int(model.geom_bodyid[geom_id]) == object_body
+    ]
+    collision_geom = next(
+        (geom_id for geom_id in object_geom_ids if str(model.geom(geom_id).name).endswith("_collision")),
+        object_geom_ids[0] if object_geom_ids else None,
+    )
+    if collision_geom is None:
+        raise ValueError(f"scene object body {object_body} has no geometry")
+    half_height = float(model.geom_size[collision_geom][2])
+    table_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "table_body")
+    if table_body < 0:
+        raise ValueError("scene is missing table_body")
+    table_top = [
+        geom_id
+        for geom_id in range(model.ngeom)
+        if int(model.geom_bodyid[geom_id]) == table_body and str(model.geom(geom_id).name) == "table_top"
+    ]
+    if not table_top:
+        raise ValueError("scene is missing table_top")
+    table_geom = table_top[0]
+    table_height = float(data.geom_xpos[table_geom][2] + model.geom_size[table_geom][2])
+    object_qpos = int(model.jnt_qposadr[joint_id])
+    object_qvel = int(model.jnt_dofadr[joint_id])
+    data.qpos[object_qpos + 2] = table_height + half_height + 0.002
+    data.qvel[object_qvel : object_qvel + 6] = 0.0
+    mujoco.mj_forward(model, data)
+
+
 def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float) -> dict[str, object]:
     runtime.reset()
+    _place_object_on_table(runtime, object_name)
     controller = SimpleSceneController()
     waypoints = planner.plan(object_name=object_name, episode_index=episode_index, runtime=runtime) if isinstance(planner, CuroboSceneTrajectoryPlanner) else planner.plan(object_name=object_name, episode_index=episode_index)
     if not waypoints:

@@ -27,7 +27,19 @@ def build_scene(root: Path, object_name: str, *, output: Path) -> Path:
     spec.modelfiledir = str(base.parent)
     spec.meshdir = str(base.parent / "meshes")
     spec.add_mesh(name=f"robosuite_{object_name}_visual", file=str(asset_dir / "objects" / "meshes" / f"{object_name}.stl"))
-    body = spec.worldbody.add_body(name=f"robosuite_{object_name}_body", pos=[0.35, 0.0, 0.9])
+    # Place the object on the tabletop instead of leaving it suspended in
+    # mid-air.  The base scene's tabletop top is derived from its body/geom
+    # transforms, and collision_size[2] is the object's half-height for all
+    # supported primitive collision shapes.
+    table_body = next((item for item in spec.worldbody.bodies if item.name == "table_body"), None)
+    if table_body is None:
+        raise ValueError("base scene is missing table_body")
+    table_geom = next((item for item in table_body.geoms if item.name == "table_top"), None)
+    if table_geom is None:
+        raise ValueError("base scene is missing table_top")
+    table_top_z = float(table_body.pos[2]) + float(table_geom.pos[2]) + float(table_geom.size[2])
+    object_center_z = table_top_z + float(collision_size[2]) + 0.002
+    body = spec.worldbody.add_body(name=f"robosuite_{object_name}_body", pos=[0.35, 0.0, object_center_z])
     body.add_freejoint(name=f"robosuite_{object_name}_free")
     body.add_geom(
         name=f"robosuite_{object_name}_visual",
