@@ -209,6 +209,10 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         action=np.asarray(actions, dtype=np.float32),
         object_pose=np.asarray(objects, dtype=np.float32),
         timestamp_s=np.asarray(timestamps, dtype=np.float64),
+        success=np.asarray(success, dtype=np.bool_),
+        object_horizontal_displacement_m=np.asarray(object_delta_xy, dtype=np.float32),
+        object_max_lift_m=np.asarray(max_lift, dtype=np.float32),
+        object_final_height_error_m=np.asarray(final_height_error, dtype=np.float32),
     )
     return {
         "success": success,
