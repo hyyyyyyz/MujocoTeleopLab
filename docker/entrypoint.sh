@@ -3,6 +3,13 @@ set -euo pipefail
 
 cd /workspace
 
+# The isolated scene environment installs decoupled-WBC in editable mode.  A
+# bind-mounted checkout may carry an editable .pth generated on another host,
+# so make both the repository and its third-party namespace explicit for every
+# scene/VLA invocation.  This also keeps ``docker compose run ... vla``
+# deterministic when the caller does not provide PYTHONPATH.
+export PYTHONPATH="/workspace:/workspace/third_party${PYTHONPATH:+:${PYTHONPATH}}"
+
 ensure_scene_env() {
   # The scene stack is intentionally isolated from the main package, but the
   # environment is created inside the container (the repository is mounted at
