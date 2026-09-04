@@ -136,6 +136,7 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
     timestamps: list[float] = []
     grasp_states: list[bool] = []
     diagnostic_printed = False
+    post_step_diagnostic_printed = False
     attachment = KinematicObjectAttachment(runtime, object_name)
     image_dir = output_dir / f"episode_{episode_index:06d}"
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +200,12 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         for _ in range(runtime._control_decimation):
             runtime._apply_pd()
             runtime._mujoco.mj_step(runtime.model, runtime.data)
+        if grasp_requested and not post_step_diagnostic_printed:
+            mujoco_mod = __import__('mujoco')
+            hand_id = mujoco_mod.mj_name2id(runtime.model, mujoco_mod.mjtObj.mjOBJ_BODY, 'right_wrist_yaw_link')
+            finger_ids = [mujoco_mod.mj_name2id(runtime.model, mujoco_mod.mjtObj.mjOBJ_BODY, n) for n in ('right_hand_index_1_link','right_hand_middle_1_link','right_hand_thumb_2_link')]
+            print('GRASP_DIAG post_step hand=', runtime.data.xpos[hand_id].tolist(), 'fingers=', [runtime.data.xpos[i].tolist() for i in finger_ids], 'object=', _object_pose(runtime, object_name)[:3].tolist(), 'contact=', attachment.attached, 'ncon=', int(runtime.data.ncon), flush=True)
+            post_step_diagnostic_printed = True
         if released_this_frame:
             # Let MuJoCo integrate the released free body.  Do not snap it to
             # the tabletop: SIMPLE records the real drop/settling dynamics.
