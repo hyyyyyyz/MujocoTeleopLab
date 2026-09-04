@@ -123,6 +123,7 @@ def replay_episode(
     render_dir.mkdir(parents=True, exist_ok=True)
     replay_state: list[np.ndarray] = []
     replay_object: list[np.ndarray] = []
+    rendered_frame = 0
     for frame, target in enumerate(actions):
         runtime._target_by_joint = dict(zip(runtime._actuator_names, target, strict=True))
         for _ in range(runtime._control_decimation):
@@ -136,7 +137,11 @@ def replay_episode(
         )
         replay_object.append(_object_pose(runtime, object_name).astype(np.float64))
         if frame % image_stride == 0:
-            _render_frame(renderer, runtime, render_dir / f"{frame:06d}.jpg")
+            # Keep rendered files contiguous so ffmpeg's image-sequence
+            # demuxer does not stop at the first stride gap (000000, 000005,
+            # ... would otherwise produce a one-frame video).
+            _render_frame(renderer, runtime, render_dir / f"{rendered_frame:06d}.jpg")
+            rendered_frame += 1
     renderer.close()
 
     replay_state_array = np.asarray(replay_state)
