@@ -36,3 +36,63 @@ services:
     stdin_open: true
     tty: true
     init: true
+
+  # Python 3.12 XRoboToolkit SDK and PC Service.  This remains separate from
+  # the CUDA/Python 3.10 scene image and sends normalized packets over the
+  # host-network UDP endpoint 127.0.0.1:17600.
+  xrbridge:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.xrbridge
+      network: host
+    image: mujoco-teleoplab:xrbridge
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+    environment:
+      PYTHONPATH: /workspace
+      DISPLAY: ${DISPLAY:-:0}
+    network_mode: host
+    stdin_open: true
+    tty: true
+    init: true
+    profiles: [teleop]
+
+  # Optional all-Docker interactive scene target.  It expects the xrbridge
+  # service above and forwards its MuJoCo GLFW window through the SSH X11
+  # display.  Batch VLA generation should continue using the default service
+  # with MUJOCO_GL=egl instead.
+  scene-x11:
+    image: mujoco-teleoplab:cuda
+    working_dir: /workspace
+    depends_on:
+      - xrbridge
+    volumes:
+      - ..:/workspace
+      - ${HOME}/.Xauthority:/root/.Xauthority:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      XAUTHORITY: /root/.Xauthority
+      MUJOCO_GL: egl
+      QT_X11_NO_MITSHM: "1"
+      PYTHONPATH: /workspace
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility,graphics,display}
+    gpus: all
+    ipc: host
+    shm_size: 2gb
+    network_mode: host
+    stdin_open: true
+    tty: true
+    init: true
+    command:
+      - bash
+      - -lc
+      - >-
+        .venv_scene/bin/python scripts/run/run_scene_teleop.py
+        --scene robosuite-can
+        --bridge-host 127.0.0.1
+        --bridge-port 17600
+        --video-host ${PICO_VIDEO_HOST:-10.0.90.191}
+    profiles: [teleop]

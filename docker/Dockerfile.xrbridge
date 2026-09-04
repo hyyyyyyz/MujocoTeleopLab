@@ -1,0 +1,50 @@
+# Python 3.12 XRoboToolkit bridge image.
+# This image is intentionally separate from the CUDA/Python 3.10 MuJoCo image:
+# the released native SDK is compiled against Python 3.12.
+FROM python:3.12-bookworm
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG XRTOOLKIT_SERVICE_URL=https://github.com/XR-Robotics/XRoboToolkit-PC-Service/releases/download/v1.0.0/XRoboToolkit_PC_Service_1.0.0_ubuntu_24.04_amd64.deb
+ARG XRTOOLKIT_BINDING_REPO=https://github.com/XR-Robotics/XRoboToolkit-PC-Service-Pybind.git
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/workspace
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake ninja-build git curl ca-certificates dpkg-dev \
+      libstdc++6 libgcc-s1 libglib2.0-0 libx11-6 libxext6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/mujocoteleoplab
+COPY pyproject.toml README.md LICENSE ./
+COPY teleopit ./teleopit
+COPY scripts/setup/patches ./scripts/setup/patches
+
+RUN python -m venv /opt/xrbridge-venv \
+    && /opt/xrbridge-venv/bin/python -m pip install --upgrade pip setuptools wheel \
+    && /opt/xrbridge-venv/bin/python -m pip install numpy pybind11 \
+    && /opt/xrbridge-venv/bin/python -m pip install --no-deps -e .
+
+RUN mkdir -p /opt/xrobotoolkit \
+    && curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
+       -o /opt/xrobotoolkit/pc-service.deb "${XRTOOLKIT_SERVICE_URL}" \
+    && dpkg-deb -x /opt/xrobotoolkit/pc-service.deb /opt/xrobotoolkit/service \
+    && git clone --depth 1 "${XRTOOLKIT_BINDING_REPO}" /opt/xrobotoolkit/bindings \
+    && git -C /opt/xrobotoolkit/bindings apply /opt/mujocoteleoplab/scripts/setup/patches/xrobotoolkit_pybind_gil.patch \
+    && mkdir -p /opt/xrobotoolkit/bindings/lib \
+    && cp /opt/xrobotoolkit/service/opt/apps/roboticsservice/SDK/include/PXREARobotSDK.h /opt/xrobotoolkit/bindings/include/PXREARobotSDK.h \
+    && cp /opt/xrobotoolkit/service/opt/apps/roboticsservice/SDK/x64/libPXREARobotSDK.so /opt/xrobotoolkit/bindings/lib/libPXREARobotSDK.so \
+    && printf '%s\n' 'set_target_properties(xrobotoolkit_sdk PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")' >> /opt/xrobotoolkit/bindings/CMakeLists.txt \
+    && /opt/xrbridge-venv/bin/python -m pip install --no-build-isolation --force-reinstall /opt/xrobotoolkit/bindings \
+    && cp /opt/xrobotoolkit/bindings/lib/libPXREARobotSDK.so /opt/xrbridge-venv/lib/python3.12/site-packages/ \
+    && /opt/xrbridge-venv/bin/python -c 'import xrobotoolkit_sdk; print("xrobotoolkit_sdk OK")'
+
+COPY docker/entrypoint-xrbridge.sh /usr/local/bin/entrypoint-xrbridge
+RUN chmod +x /usr/local/bin/entrypoint-xrbridge
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/entrypoint-xrbridge"]
+CMD ["--host", "127.0.0.1", "--port", "17600"]

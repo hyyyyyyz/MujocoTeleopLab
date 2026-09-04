@@ -94,6 +94,27 @@ MUJOCO_GL=glfw docker compose -f docker/compose.yml run --rm mujoco-teleoplab \
 `scripts/run/run_scene_xr_bridge.py`，再让容器里的 scene 服务通过主机网络接收
 UDP。若只做自动 VLA 生成，则不需要启动 PICO 或 XRoboToolkit。
 
+### 全 Docker bridge（可选）
+
+如果不希望在 5090 宿主机安装 Python 3.12，可以使用独立的 `xrbridge` 容器。
+它包含 Python 3.12、XRoboToolkit 原生 binding 和 PC Service；MuJoCo 场景仍在
+CUDA/Python 3.10 容器中运行。两个服务使用 host 网络的 `127.0.0.1:17600` 通信：
+
+```bash
+PICO_VIDEO_HOST=10.0.90.191 \
+DISPLAY="$DISPLAY" \
+docker compose -f docker/compose.yml --profile teleop up --build \
+  xrbridge scene-x11
+```
+
+通过 SSH X11 启动时，在远端 shell 中执行同一命令即可；确保远端
+`$DISPLAY` 和 `$HOME/.Xauthority` 已由 `ssh -Y` 设置。PICO 仍需选择
+`Head`、`Controller`、`Send`、`ZEDMINI`，最后点击 `Listen`。
+
+首次构建 `mujoco-teleoplab:xrbridge` 会下载官方 PC Service（约 110 MB）并编译
+原生 SDK，耗时比普通场景镜像更长。批量 VLA 采集不需要启动 `scene-x11`，继续使用
+EGL 模式即可。
+
 ## 常用命令
 
 ```bash
