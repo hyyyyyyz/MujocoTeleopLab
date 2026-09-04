@@ -89,14 +89,13 @@ MUJOCO_GL=glfw docker compose -f docker/compose.yml run --rm mujoco-teleoplab \
 
 ## PICO/XRoboToolkit 说明
 
-容器隔离的是 MuJoCo/WBC/CuRobo 运行时。XRoboToolkit PC Service 和其 Python SDK
-通常绑定主机桌面、USB/网络设备，建议继续在主机的 Python 3.12 `.venv` 运行
-`scripts/run/run_scene_xr_bridge.py`，再让容器里的 scene 服务通过主机网络接收
-UDP。若只做自动 VLA 生成，则不需要启动 PICO 或 XRoboToolkit。
+容器隔离的是 MuJoCo/WBC/CuRobo 运行时。PICO/XRoboToolkit bridge 也已经提供独立
+的 Python 3.12 容器，因此不依赖 5090 宿主机的 Python、`.venv` 或 SDK 安装。
+若只做自动 VLA 生成，则不需要启动 PICO 或 XRoboToolkit。
 
-### 全 Docker bridge（可选）
+### 全 Docker bridge
 
-如果不希望在 5090 宿主机安装 Python 3.12，可以使用独立的 `xrbridge` 容器。
+使用独立的 `xrbridge` 容器：
 它包含 Python 3.12、XRoboToolkit 原生 binding 和 PC Service；MuJoCo 场景仍在
 CUDA/Python 3.10 容器中运行。两个服务使用 host 网络的 `127.0.0.1:17600` 通信：
 
@@ -112,8 +111,9 @@ docker compose -f docker/compose.yml --profile teleop up --build \
 `Head`、`Controller`、`Send`、`ZEDMINI`，最后点击 `Listen`。
 
 首次构建 `mujoco-teleoplab:xrbridge` 会下载官方 PC Service（约 110 MB）并编译
-原生 SDK，耗时比普通场景镜像更长。批量 VLA 采集不需要启动 `scene-x11`，继续使用
-EGL 模式即可。
+原生 SDK，耗时比普通场景镜像更长。`scene-x11` 首次启动时还会在容器挂载的
+`/workspace` 内自动创建 `.venv_scene` 并下载 `decoupled_wbc` 场景依赖；这些步骤
+不使用宿主机 Python。批量 VLA 采集不需要启动 `scene-x11`，继续使用 EGL 模式即可。
 
 ## 常用命令
 

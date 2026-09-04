@@ -94,6 +94,8 @@ services:
       - bash
       - -lc
       - >-
+        if [ ! -x .venv_scene/bin/python ] || [ ! -d third_party/decoupled_wbc/.git ]; then
+        SCENE_TORCH_PREINSTALLED=1 bash scripts/setup/setup_scene_teleop.sh; fi &&
         .venv_scene/bin/python scripts/run/run_scene_teleop.py
         --scene robosuite-can
         --bridge-host 127.0.0.1
