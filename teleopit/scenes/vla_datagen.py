@@ -9,7 +9,7 @@ implementation can replace it without changing the recorder format.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -406,6 +406,41 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         trajectory = position.detach().cpu().numpy()
         return trajectory, names
 
+    def _plan_joint_segment(
+        self,
+        current: dict[str, float],
+        goal: Mapping[str, float],
+        world: Any,
+    ) -> tuple[np.ndarray, tuple[str, ...]]:
+        """Plan to a Bodex phase qpos using CuRobo's joint-space planner."""
+
+        torch = self._torch
+        names = tuple(self._motion_gen.joint_names)
+        missing = [name for name in names if name not in current or name not in goal]
+        if missing:
+            raise RuntimeError(f"Bodex phase is missing CuRobo joints: {missing[:8]}")
+        tensor_args = self._TensorDeviceType()
+        start = torch.tensor([current[name] for name in names], device="cuda", dtype=torch.float32).view(1, -1)
+        target = torch.tensor([goal[name] for name in names], device="cuda", dtype=torch.float32).view(1, -1)
+        start_state = self._JointState.from_position(tensor_args.to_device(start), joint_names=list(names))
+        goal_state = self._JointState.from_position(tensor_args.to_device(target), joint_names=list(names))
+        self._motion_gen.update_world(world)
+        result = self._motion_gen.plan_single_js(
+            start_state,
+            goal_state,
+            plan_config=__import__("curobo.wrap.reacher.motion_gen", fromlist=["MotionGenPlanConfig"]).MotionGenPlanConfig(
+                enable_finetune_trajopt=True, num_trajopt_seeds=8, max_attempts=20
+            ),
+        )
+        if not bool(result.success.item()):
+            raise RuntimeError(f"CuRobo failed to plan Bodex joint segment: {result.status}")
+        last_tstep = result.path_buffer_last_tstep
+        end = int(last_tstep.item()) if hasattr(last_tstep, "item") else int(last_tstep[0].item())
+        position = result.interpolated_plan.trim_trajectory(0, end).position
+        if position.ndim == 3:
+            position = position[0]
+        return position.detach().cpu().numpy(), names
+
     @staticmethod
     def episode_variation(episode_index: int) -> dict[str, float]:
         """Return bounded deterministic task variation for one episode.
@@ -460,17 +495,36 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         world = self._world(ignored_object_name=object_name)
         current = runtime._current_joint_positions()
         segments: list[tuple[np.ndarray, tuple[str, ...], float, float]] = []
-        for position, trigger, grip in (
-            (target, 0.0, 0.0),
-            (grasp, 1.0, 1.0),
-            (target + np.array([0, 0, 0.15]), 1.0, 1.0),
-            (place, 1.0, 1.0),
-            (place, 0.0, 0.0),
-        ):
-            relative_position, relative_quat = self._relative_pose(position, grasp_quat)
+        if grasp_record := self._grasp_record:
+            # Reuse the actual SIMPLE phase qpos for approach, grasp, squeeze
+            # and lift. CuRobo's JS planner adds collision-aware interpolation
+            # between those phase states; only the final transport/release
+            # remains task-specific because the destination is generated here.
+            for phase, trigger, grip in (("pregrasp", 0.0, 0.0), ("grasp", 1.0, 1.0), ("squeeze", 1.0, 1.0), ("lift", 1.0, 1.0)):
+                phase_goal = getattr(grasp_record, phase)
+                trajectory, names = self._plan_joint_segment(current, phase_goal, world)
+                segments.append((trajectory, names, trigger, grip))
+                current.update(dict(zip(names, trajectory[-1], strict=True)))
+            # Place is still generated in Cartesian space from the lift pose.
+            relative_position, relative_quat = self._relative_pose(place, grasp_quat)
             trajectory, names = self._plan_segment(current, relative_position, relative_quat, world)
-            segments.append((trajectory, names, trigger, grip))
+            segments.append((trajectory, names, 1.0, 1.0))
             current.update(dict(zip(names, trajectory[-1], strict=True)))
+            relative_position, relative_quat = self._relative_pose(place, grasp_quat)
+            trajectory, names = self._plan_segment(current, relative_position, relative_quat, world)
+            segments.append((trajectory, names, 0.0, 0.0))
+        else:
+            for position, trigger, grip in (
+                (target, 0.0, 0.0),
+                (grasp, 1.0, 1.0),
+                (target + np.array([0, 0, 0.15]), 1.0, 1.0),
+                (place, 1.0, 1.0),
+                (place, 0.0, 0.0),
+            ):
+                relative_position, relative_quat = self._relative_pose(position, grasp_quat)
+                trajectory, names = self._plan_segment(current, relative_position, relative_quat, world)
+                segments.append((trajectory, names, trigger, grip))
+                current.update(dict(zip(names, trajectory[-1], strict=True)))
         waypoints: list[JointWaypoint] = []
         grasp_record = self._grasp_record
         right_hand_names = tuple(runtime._right_hand_joint_names)
@@ -498,12 +552,12 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                 )
             close_hand = phase_hand["grasp"]
             squeeze_hand = phase_hand["squeeze"]
-        phase_names = ("pregrasp", "grasp", "lift", "transport", "release")
+        phase_names = ("pregrasp", "grasp", "squeeze", "lift", "transport", "release") if grasp_record else ("pregrasp", "grasp", "lift", "transport", "release")
         for segment_index, (trajectory, names, trigger, grip) in enumerate(segments):
             for row in trajectory:
                 hand_target = None
                 if grasp_record is not None:
-                    phase = ("pregrasp", "grasp", "lift", "lift", "release")[segment_index]
+                    phase = phase_names[min(segment_index, len(phase_names) - 1)]
                     if phase != "release":
                         hand_target = tuple(float(value) for value in phase_hand[phase])
                 elif segment_index == 1:
