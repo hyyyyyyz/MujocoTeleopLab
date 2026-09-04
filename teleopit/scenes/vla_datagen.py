@@ -427,6 +427,20 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         # Keep the object center as the task point and offset the palm behind
         # it, matching SIMPLE's grasp-pose convention.
         palm_offset = np.array([-0.11, 0.0, 0.0], dtype=np.float64)
+        # SIMPLE's released Dex3 grasp primitives use a palm orientation of
+        # ``euler2quat(pi, 0, 0)`` for tabletop objects.  Planning with the
+        # object's identity quaternion leaves the fingers facing away from
+        # the can/cube, so the hand merely brushes its side.  Keep this
+        # orientation for every approach/lift/place pose.
+        object_rotation = Rotation.from_quat(
+            [object_pose[4], object_pose[5], object_pose[6], object_pose[3]]
+        )
+        grasp_rotation = object_rotation * Rotation.from_euler("x", np.pi)
+        grasp_xyzw = grasp_rotation.as_quat()
+        grasp_quat = np.array(
+            [grasp_xyzw[3], grasp_xyzw[0], grasp_xyzw[1], grasp_xyzw[2]],
+            dtype=np.float64,
+        )
         grasp = object_pose[:3] + palm_offset
         target = grasp.copy()
         target[2] += variation["lift"]
@@ -447,7 +461,7 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
             (place, 1.0, 1.0),
             (place, 0.0, 0.0),
         ):
-            relative_position, relative_quat = self._relative_pose(position, object_pose[3:7])
+            relative_position, relative_quat = self._relative_pose(position, grasp_quat)
             trajectory, names = self._plan_segment(current, relative_position, relative_quat, world)
             segments.append((trajectory, names, trigger, grip))
             current.update(dict(zip(names, trajectory[-1], strict=True)))
