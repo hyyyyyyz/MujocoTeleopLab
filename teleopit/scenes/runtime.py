@@ -390,7 +390,12 @@ class SceneTeleopRuntime:
         body_kd = np.asarray(wbc_config["MOTOR_KD"], dtype=np.float64)
         if body_kp.shape != (len(self._body_joint_names),) or body_kd.shape != body_kp.shape:
             raise ValueError("decoupled-WBC body PD gains do not match its 29-DOF joint declaration")
-        hand_kp = np.array([5.0, 5.0, 5.0, 2.5, 2.5, 2.5, 2.5], dtype=np.float64)
+        # Match SIMPLE's released G1 Dex3 position-controller stiffness.  The
+        # previous [5, 5, 5, 2.5, ...] gains were suitable for a visual
+        # teleop preview but far too weak to generate sustained finger
+        # contact/friction during a dynamic grasp; the object consequently
+        # stayed on the table even when contact was detected.
+        hand_kp = np.array([80.0, 40.0, 40.0, 60.0, 40.0, 40.0, 40.0], dtype=np.float64)
         self._kp_by_joint = dict(zip(self._body_joint_names, body_kp, strict=True))
         self._kd_by_joint = dict(zip(self._body_joint_names, body_kd, strict=True))
         for names in (self._left_hand_joint_names, self._right_hand_joint_names):
