@@ -136,15 +136,22 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         rotation = Rotation.from_quat([q[1], q[2], q[3], q[0]])
         return rotation.inv().apply(np.asarray(vector, dtype=np.float64))
 
-    def _world(self) -> Any:
+    def _world(self, *, ignored_object_name: str | None = None) -> Any:
         """Convert MuJoCo non-robot collision geoms to CuRobo cuboids."""
         mujoco = self.runtime._mujoco
         model, data = self.runtime.model, self.runtime.data
         world = self._WorldConfig()
         robot_bodies = set(self.runtime._robot_body_ids)
+        ignored_bodies: set[int] = set()
+        if ignored_object_name is not None:
+            joint_name = "cube_joint" if ignored_object_name == "cube" else f"robosuite_{ignored_object_name}_free"
+            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            if joint_id >= 0:
+                object_body = int(model.jnt_bodyid[joint_id])
+                ignored_bodies.update(self.runtime._descendant_body_ids(object_body))
         for geom_id in range(model.ngeom):
             body_id = int(model.geom_bodyid[geom_id])
-            if body_id in robot_bodies:
+            if body_id in robot_bodies or body_id in ignored_bodies:
                 continue
             geom_type = int(model.geom_type[geom_id])
             if geom_type == int(mujoco.mjtGeom.mjGEOM_PLANE):
@@ -250,7 +257,11 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
         target[2] += 0.10
         place = target.copy()
         place[0] += 0.16 + 0.015 * ((episode_index % 5) - 2)
-        world = self._world()
+        # The manipulated object is deliberately excluded from the static
+        # collision world.  Keeping it as an obstacle makes the grasp pose
+        # itself invalid, so CuRobo falls back to a nearby contact/push path;
+        # MuJoCo still supplies the real object contacts during execution.
+        world = self._world(ignored_object_name=object_name)
         current = runtime._current_joint_positions()
         segments: list[tuple[np.ndarray, tuple[str, ...], float, float]] = []
         for position, trigger, grip in ((target, 0.0, 0.0), (object_pose[:3], 1.0, 1.0), (target + np.array([0, 0, 0.15]), 1.0, 1.0), (place, 1.0, 1.0), (place, 0.0, 0.0)):

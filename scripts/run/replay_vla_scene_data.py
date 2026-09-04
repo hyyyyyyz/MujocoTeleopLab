@@ -85,6 +85,8 @@ def replay_episode(
     hz: float,
     state_tolerance: float,
     object_success_threshold: float,
+    object_lift_threshold: float,
+    object_final_height_tolerance: float,
     make_video: bool,
 ) -> dict[str, object]:
     with np.load(episode_path, allow_pickle=False) as archive:
@@ -148,9 +150,18 @@ def replay_episode(
     replay_object_array = np.asarray(replay_object)
     state_error = np.abs(replay_state_array - recorded_state)
     object_error = np.linalg.norm(replay_object_array[:, :3] - recorded_object[:, :3], axis=1)
-    displacement = float(np.linalg.norm(replay_object_array[-1, :3] - replay_object_array[0, :3]))
+    object_positions = replay_object_array[:, :3]
+    horizontal_displacement = float(np.linalg.norm(object_positions[-1, :2] - object_positions[0, :2]))
+    initial_height = float(object_positions[0, 2])
+    max_lift = float(np.max(object_positions[:, 2]) - initial_height)
+    final_height_error = float(abs(object_positions[-1, 2] - initial_height))
+    lifted = bool(max_lift >= object_lift_threshold)
+    placed = bool(
+        horizontal_displacement >= object_success_threshold
+        and final_height_error <= object_final_height_tolerance
+    )
     report: dict[str, object] = {
-        "format": "teleopit_scene_vla_replay_v1",
+        "format": "teleopit_scene_vla_replay_v2",
         "scene": scene,
         "episode": str(episode_path),
         "frames": int(len(actions)),
@@ -159,8 +170,13 @@ def replay_episode(
         "state_max_abs_error": float(np.max(state_error, initial=0.0)),
         "state_rmse": float(np.sqrt(np.mean(np.square(state_error)))),
         "object_pose_max_position_error_m": float(np.max(object_error, initial=0.0)),
-        "object_displacement_m": displacement,
-        "success": bool(displacement >= object_success_threshold),
+        "object_displacement_m": float(np.linalg.norm(object_positions[-1] - object_positions[0])),
+        "object_horizontal_displacement_m": horizontal_displacement,
+        "object_max_lift_m": max_lift,
+        "object_final_height_error_m": final_height_error,
+        "lifted": lifted,
+        "placed": placed,
+        "success": bool(lifted and placed),
         "state_match": bool(np.max(state_error, initial=0.0) <= state_tolerance),
         "video": None,
     }
@@ -180,10 +196,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image-stride", type=int, default=5)
     parser.add_argument("--hz", type=float, default=50.0)
     parser.add_argument("--state-tolerance", type=float, default=0.05)
-    parser.add_argument("--object-success-threshold", type=float, default=0.01)
+    parser.add_argument("--object-success-threshold", type=float, default=0.10)
+    parser.add_argument("--object-lift-threshold", type=float, default=0.03)
+    parser.add_argument("--object-final-height-tolerance", type=float, default=0.06)
     parser.add_argument("--no-video", action="store_true")
     args = parser.parse_args(argv)
-    if args.image_stride <= 0 or args.hz <= 0 or args.state_tolerance < 0 or args.object_success_threshold < 0:
+    if args.image_stride <= 0 or args.hz <= 0 or args.state_tolerance < 0 or args.object_success_threshold < 0 or args.object_lift_threshold < 0 or args.object_final_height_tolerance < 0:
         parser.error("image-stride and hz must be positive; tolerances must be non-negative")
     episode = args.episode if args.episode.is_absolute() else PROJECT_ROOT / args.episode
     if not episode.is_file():
@@ -199,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
         hz=args.hz,
         state_tolerance=args.state_tolerance,
         object_success_threshold=args.object_success_threshold,
+        object_lift_threshold=args.object_lift_threshold,
+        object_final_height_tolerance=args.object_final_height_tolerance,
         make_video=not args.no_video,
     )
     print(json.dumps(report, indent=2))

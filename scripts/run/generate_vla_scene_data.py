@@ -75,7 +75,7 @@ def _capture(renderer: object, runtime: SceneTeleopRuntime) -> np.ndarray:
     return np.asarray(renderer.render(), dtype=np.uint8).copy()
 
 
-def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float) -> bool:
+def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, object_name: str, episode_index: int, output_dir: Path, image_stride: int, hz: float) -> dict[str, object]:
     runtime.reset()
     controller = SimpleSceneController()
     waypoints = planner.plan(object_name=object_name, episode_index=episode_index, runtime=runtime) if isinstance(planner, CuroboSceneTrajectoryPlanner) else planner.plan(object_name=object_name, episode_index=episode_index)
@@ -113,7 +113,19 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         packet = _packet(sequence, timestamp, pose, trigger, grip)
         command = controller.update(packet)
         if isinstance(joint_waypoint, JointWaypoint):
+            # Keep the balance/WBC target alive while CuRobo overrides only
+            # the planned arm joints.  Bypassing update_policy here leaves
+            # legs at the raw XML reset pose and makes the robot push/fall
+            # instead of executing a stable manipulation.
+            runtime.update_policy(command, active=True)
             runtime._target_by_joint.update(joint_waypoint.positions)
+            # CuRobo's URDF intentionally plans the 10-DOF waist/right-arm
+            # chain.  Apply the controller-compatible Dex3 finger IK for the
+            # trigger/grip state separately so the object is actually held.
+            right_hand_q = runtime._retargeting_ik.right_hand_ik_solver(command.right_fingers)
+            left_hand_q = runtime._retargeting_ik.left_hand_ik_solver(command.left_fingers)
+            runtime._target_by_joint.update(dict(zip(runtime._right_hand_joint_names, right_hand_q, strict=True)))
+            runtime._target_by_joint.update(dict(zip(runtime._left_hand_joint_names, left_hand_q, strict=True)))
         else:
             runtime.update_policy(command, active=True)
         for _ in range(runtime._control_decimation):
@@ -132,8 +144,20 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         timestamp += 1.0 / hz
     renderer.close()
 
-    object_delta = float(np.linalg.norm(objects[-1][:3] - objects[0][:3]))
-    success = object_delta >= 0.01
+    object_positions = np.asarray(objects, dtype=np.float64)[:, :3]
+    object_delta_xy = float(np.linalg.norm(object_positions[-1, :2] - object_positions[0, :2]))
+    initial_z = float(object_positions[0, 2])
+    max_lift = float(np.max(object_positions[:, 2]) - initial_z)
+    final_height_error = float(abs(object_positions[-1, 2] - initial_z))
+    # A valid pick/place must show a lift and a rightward horizontal transfer,
+    # then settle back near the original tabletop height.  Pure pushes and
+    # drops therefore no longer pass the collection success flag.
+    lifted = bool(max_lift >= 0.03)
+    placed = bool(
+        object_delta_xy >= 0.10
+        and final_height_error <= 0.06
+    )
+    success = bool(lifted and placed)
     np.savez_compressed(
         output_dir / f"episode_{episode_index:06d}.npz",
         observation_state=np.asarray(states, dtype=np.float32),
@@ -141,7 +165,14 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         object_pose=np.asarray(objects, dtype=np.float32),
         timestamp_s=np.asarray(timestamps, dtype=np.float64),
     )
-    return success
+    return {
+        "success": success,
+        "object_horizontal_displacement_m": object_delta_xy,
+        "object_max_lift_m": max_lift,
+        "object_final_height_error_m": final_height_error,
+        "lifted": lifted,
+        "placed": placed,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -191,12 +222,12 @@ def main(argv: list[str] | None = None) -> int:
     with episodes_path.open("w", encoding="utf-8") as stream:
         for index in range(args.episodes):
             started = time.time()
-            success = generate_planned_episode(runtime, planner=planner, object_name=object_name, episode_index=index, output_dir=output_dir, image_stride=args.image_stride, hz=args.hz)
+            metrics = generate_planned_episode(runtime, planner=planner, object_name=object_name, episode_index=index, output_dir=output_dir, image_stride=args.image_stride, hz=args.hz)
             stream.write(json.dumps({
                 "episode_index": index,
                 "scene": args.scene,
                 "task": f"pick up the {args.scene} and place it to the right",
-                "success": success,
+                **metrics,
                 "duration_s": round(time.time() - started, 3),
                 "data": f"episode_{index:06d}.npz",
                 "images": f"episode_{index:06d}",
