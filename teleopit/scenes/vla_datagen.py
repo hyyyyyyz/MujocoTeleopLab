@@ -64,23 +64,14 @@ class KinematicObjectAttachment:
         self._joint_qpos = int(model.jnt_qposadr[joint_id])
         self._joint_qvel = int(model.jnt_dofadr[joint_id])
         self._hand_body_id = int(body_id)
+        wrist_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, hand_body)
+        parent = np.asarray(model.body_parentid, dtype=np.int64)
         self._finger_body_ids = tuple(
-            int(candidate)
-            for name in (
-                "right_hand_index_1_link",
-                "right_hand_middle_1_link",
-                "right_hand_thumb_2_link",
-                # Activated-finger Dex3 meshes may make contact on the palm
-                # or proximal phalanx before the distal body enters the
-                # manifold.  Count the complete right-hand subtree as a real
-                # hand/object contact; success still requires dynamic lift,
-                # so this does not turn a push into a valid grasp.
-                "right_hand_index_0_link",
-                "right_hand_middle_0_link",
-                "right_hand_thumb_1_link",
-                "right_hand_palm_link",
-            )
-            if (candidate := mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)) >= 0
+            body_id
+            for body_id in range(int(model.nbody))
+            if body_id != 0
+            and body_id != int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "left_wrist_yaw_link"))
+            and self._is_descendant(body_id, wrist_body, parent)
         )
         self._object_geom_ids = tuple(
             int(geom_id)
@@ -94,6 +85,13 @@ class KinematicObjectAttachment:
         )
         self._attached = False
         self._ever_contacted = False
+
+    @staticmethod
+    def _is_descendant(body_id: int, ancestor: int, parent: np.ndarray) -> bool:
+        current = int(body_id)
+        while current > 0 and current != ancestor:
+            current = int(parent[current])
+        return current == int(ancestor)
 
     @property
     def attached(self) -> bool:
