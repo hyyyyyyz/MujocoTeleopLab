@@ -136,11 +136,15 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
         if isinstance(planner, CuroboSceneTrajectoryPlanner)
         else {"object_dx": 0.0, "object_dy": 0.0}
     )
-    place_object_on_table(
-        runtime,
-        object_name,
-        offset_xy=(variation["object_dx"], variation["object_dy"]),
-    )
+    # SIMPLE/Bodex phase qpos is solved for the source object's canonical
+    # world_cfg pose.  Do not perturb that object before executing the phase
+    # states; varying it without transforming every Bodex joint target turns a
+    # valid grasp into an open-loop push.  Destination variation remains in the
+    # planner's transport segment.
+    object_offset = (variation["object_dx"], variation["object_dy"])
+    if isinstance(planner, CuroboSceneTrajectoryPlanner) and planner._grasp_record is not None:
+        object_offset = (0.0, 0.0)
+    place_object_on_table(runtime, object_name, offset_xy=object_offset)
     controller = SimpleSceneController()
     waypoints = planner.plan(object_name=object_name, episode_index=episode_index, runtime=runtime) if isinstance(planner, CuroboSceneTrajectoryPlanner) else planner.plan(object_name=object_name, episode_index=episode_index)
     if not waypoints:
