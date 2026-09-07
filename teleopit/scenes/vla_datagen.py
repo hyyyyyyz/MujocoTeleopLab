@@ -572,7 +572,10 @@ class CuroboSceneTrajectoryPlanner(SceneTrajectoryPlanner):
                         trigger,
                         grip,
                         self._interpolation_dt,
-                        grasp=segment_index in (1, 2, 3),
+                        # Keep the object held through the generated transport
+                        # segment.  Releasing here would make the free body
+                        # drop before the release waypoint is reached.
+                        grasp=segment_index in (1, 2, 3, 4),
                         phase=phase_names[segment_index],
                         right_hand_positions=hand_target,
                     )

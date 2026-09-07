@@ -86,6 +86,8 @@ def _make_video(frame_dir: Path, video_path: Path, fps: float) -> bool:
 def replay_episode(
     *,
     scene: str,
+    scene_xml: Path | None = None,
+    object_name: str | None = None,
     episode_path: Path,
     render_dir: Path,
     image_stride: int,
@@ -127,12 +129,19 @@ def replay_episode(
         raise ValueError("episode contains non-finite state/action values")
 
     if scene == "cube":
-        object_name = "cube"
+        resolved_object_name = "cube"
+        resolved_scene_xml = scene_xml_path("cube")
+    elif scene == "external":
+        if scene_xml is None or not object_name:
+            raise ValueError("external replay requires scene_xml and object_name")
+        resolved_object_name = object_name
+        resolved_scene_xml = scene_xml
     else:
-        object_name = scene
-    runtime = SceneTeleopRuntime(scene_xml=scene_xml_path(scene if scene == "cube" else f"robosuite-{scene}"), input_timeout_s=1.0)
+        resolved_object_name = object_name or scene
+        resolved_scene_xml = scene_xml or scene_xml_path(f"robosuite-{scene}")
+    runtime = SceneTeleopRuntime(scene_xml=resolved_scene_xml, input_timeout_s=1.0)
     runtime.reset()
-    place_object_on_table(runtime, object_name)
+    place_object_on_table(runtime, resolved_object_name)
     import mujoco
 
     if initial_qpos is not None or initial_qvel is not None:
@@ -185,7 +194,7 @@ def replay_episode(
     replay_state: list[np.ndarray] = []
     replay_object: list[np.ndarray] = []
     replay_grasp: list[bool] = []
-    attachment = KinematicObjectAttachment(runtime, object_name)
+    attachment = KinematicObjectAttachment(runtime, resolved_object_name)
     rendered_frame = 0
     stream_process = None
     stream_stdout = None
@@ -260,7 +269,7 @@ def replay_episode(
                     dtype=np.float64,
                 )
             )
-            replay_object.append(_object_pose(runtime, object_name).astype(np.float64))
+            replay_object.append(_object_pose(runtime, resolved_object_name).astype(np.float64))
             replay_grasp.append(attachment.attached)
             if make_video and renderer is not None and frame % image_stride == 0:
                 # Keep rendered files contiguous so ffmpeg's image-sequence
@@ -344,7 +353,9 @@ def replay_episode(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scene", choices=("cube", "bottle", "can", "lemon"), default="can")
+    parser.add_argument("--scene", choices=("cube", "bottle", "can", "lemon", "external"), default="can")
+    parser.add_argument("--scene-xml", type=Path, default=None, help="Custom XML for --scene external")
+    parser.add_argument("--object-name", default=None, help="Object joint stem for a custom XML")
     parser.add_argument("--episode", type=Path, required=True, help="Recorded episode_*.npz")
     parser.add_argument("--render-dir", type=Path, default=None)
     parser.add_argument("--image-stride", type=int, default=5)
@@ -378,6 +389,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("stream-width and stream-height must be even")
     if args.interactive and args.stream:
         parser.error("--interactive and --stream are mutually exclusive")
+    if args.scene == "external" and (args.scene_xml is None or not args.object_name):
+        parser.error("--scene external requires --scene-xml and --object-name")
     episode = args.episode if args.episode.is_absolute() else PROJECT_ROOT / args.episode
     if not episode.is_file():
         parser.error(f"episode does not exist: {episode}")
@@ -386,6 +399,8 @@ def main(argv: list[str] | None = None) -> int:
         render_dir = PROJECT_ROOT / render_dir
     report = replay_episode(
         scene=args.scene,
+        scene_xml=args.scene_xml.resolve() if args.scene_xml is not None else None,
+        object_name=args.object_name,
         episode_path=episode.resolve(),
         render_dir=render_dir.resolve(),
         image_stride=args.image_stride,

@@ -343,7 +343,12 @@ def generate_planned_episode(runtime: SceneTeleopRuntime, *, planner: object, ob
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scene", choices=("cube", "bottle", "can", "lemon"), default="can")
+    parser.add_argument("--scene", choices=("cube", "bottle", "can", "lemon", "external"), default="can")
+    parser.add_argument(
+        "--object-name",
+        default=None,
+        help="Object joint stem for --scene-xml custom scenes (for example toy_rhinocero).",
+    )
     parser.add_argument("--scene-xml", type=Path)
     parser.add_argument(
         "--grasp-asset",
@@ -381,8 +386,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.scene == "cube":
         object_name = "cube"
         xml = args.scene_xml.resolve() if args.scene_xml else scene_xml_path("cube")
+    elif args.scene == "external":
+        if args.scene_xml is None or not args.object_name:
+            parser.error("--scene external requires --scene-xml and --object-name")
+        object_name = args.object_name
+        xml = args.scene_xml.resolve()
     else:
-        object_name = args.scene
+        object_name = args.object_name or args.scene
         xml = args.scene_xml.resolve() if args.scene_xml else scene_xml_path(f"robosuite-{args.scene}")
     output_dir = (PROJECT_ROOT / args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
