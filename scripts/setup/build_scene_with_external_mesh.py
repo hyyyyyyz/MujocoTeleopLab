@@ -14,7 +14,15 @@ from pathlib import Path
 import sys
 
 
-def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path, collision_dir: Path | None = None) -> Path:
+def build_scene(
+    root: Path,
+    *,
+    mesh: Path,
+    object_name: str,
+    output: Path,
+    collision_dir: Path | None = None,
+    object_z_offset: float = 0.0,
+) -> Path:
     import mujoco
 
     base = root / "third_party/decoupled_wbc/control/robot_model/model_data/g1/pnp_cube_43dof.xml"
@@ -65,11 +73,9 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path, colli
         # SIMPLE's world_cfg uses [0.4, 0, 0.017...] for this object.  The
         # tabletop is wider than its source cuboid, so keep the source x
         # coordinate instead of recentering on this template's table body.
-        # The released Dex3 fingertip model has a 2 cm higher contact frame
-        # than the source Bodex table frame.  Apply that explicit calibration
-        # offset to the object origin; it preserves the source orientation and
-        # xy pose while putting the canonical grasp inside the finger envelope.
-        pos=[0.4, 0.0, table_top_z + 0.01700369 + 0.02],
+        # SIMPLE's world_cfg uses table-relative z=0.01700369.  Optional
+        # calibration is explicit and kept outside the committed asset.
+        pos=[0.4, 0.0, table_top_z + 0.01700369 + float(object_z_offset)],
         quat=[0.98979837, -0.04731221, 0.13403188, -0.00980837],
     )
     free_joint = body.add_freejoint(name=f"robosuite_{object_name}_free")
@@ -124,12 +130,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mesh", type=Path, required=True)
     parser.add_argument("--collision-dir", type=Path, default=None)
+    parser.add_argument("--object-z-offset", type=float, default=0.0)
     parser.add_argument("--object-name", default="toy_rhinocero")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        path = build_scene(args.root.resolve(), mesh=args.mesh, object_name=args.object_name, output=args.output, collision_dir=args.collision_dir)
+        path = build_scene(
+            args.root.resolve(), mesh=args.mesh, object_name=args.object_name,
+            output=args.output, collision_dir=args.collision_dir,
+            object_z_offset=args.object_z_offset,
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"External-mesh scene build failed: {exc}", file=sys.stderr)
         return 1
