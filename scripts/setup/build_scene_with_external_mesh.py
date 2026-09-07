@@ -86,7 +86,13 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path, colli
                 type=mujoco.mjtGeom.mjGEOM_MESH,
                 meshname=name,
                 density=120.0,
-                friction=[0.95, 0.3, 0.1],
+                # SIMPLE's dex grasp assumes a high-friction rubberized
+                # fingertip/object contact.  Keep this physical (no weld or
+                # qpos override), but expose tangential and torsional friction
+                # on every convex piece so the hand can carry the object.
+                friction=[1.5, 0.8, 0.25],
+                condim=4,
+                margin=0.001,
                 solimp=[0.998, 0.998, 0.001, 0.5, 2.0],
                 solref=[0.001, 1.0],
             )
@@ -96,7 +102,9 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path, colli
             type=mujoco.mjtGeom.mjGEOM_MESH,
             meshname=mesh_name,
             density=120.0,
-            friction=[0.95, 0.3, 0.1],
+            friction=[1.5, 0.8, 0.25],
+            condim=4,
+            margin=0.001,
             solimp=[0.998, 0.998, 0.001, 0.5, 2.0],
             solref=[0.001, 1.0],
         )
