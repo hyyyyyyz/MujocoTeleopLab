@@ -31,10 +31,18 @@ def main() -> int:
     parser.add_argument("--scene-xml", type=Path, required=True)
     parser.add_argument("--grasp-asset", type=Path, required=True)
     parser.add_argument("--object-name", default="toy_rhinocero")
+    parser.add_argument(
+        "--hand-permutation",
+        default=None,
+        help="Optional comma-separated full-vector permutation, e.g. SIMPLE's Dex3 [0..9,13,14,15,16,10,11,12].",
+    )
     args = parser.parse_args()
 
     runtime = SceneTeleopRuntime(scene_xml=args.scene_xml)
-    record = load_simple_bodex(args.grasp_asset)
+    permutation = None
+    if args.hand_permutation:
+        permutation = tuple(int(item) for item in args.hand_permutation.split(","))
+    record = load_simple_bodex(args.grasp_asset, hand_permutation=permutation)
     attachment = KinematicObjectAttachment(runtime, args.object_name)
     model, data, mujoco = runtime.model, runtime.data, runtime._mujoco
     object_joint = f"robosuite_{args.object_name}_free"
