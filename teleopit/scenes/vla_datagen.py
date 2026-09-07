@@ -70,7 +70,6 @@ class KinematicObjectAttachment:
             body_id
             for body_id in range(int(model.nbody))
             if body_id != 0
-            and body_id != int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "left_wrist_yaw_link"))
             and self._is_descendant(body_id, wrist_body, parent)
         )
         self._object_geom_ids = tuple(
