@@ -51,9 +51,13 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path) -> Pa
     # SIMPLE's world_cfg pose is expressed with the table's top at z=0.  The
     # external object is translated by this scene's tabletop height while its
     # xy and wxyz orientation are retained exactly.
+    table_x = float(table_body.pos[0])
     body = spec.worldbody.add_body(
         name=f"robosuite_{object_name}_body",
-        pos=[0.4, 0.0, table_top_z + 0.01700369],
+        # SIMPLE's world_cfg places this object at the centre of its table
+        # ([0.4, 0, ...]); this template's table centre is x=0.6.  Preserve
+        # that table-relative pose instead of copying the absolute x value.
+        pos=[table_x, 0.0, table_top_z + 0.01700369],
         quat=[0.98979837, -0.04731221, 0.13403188, -0.00980837],
     )
     free_joint = body.add_freejoint(name=f"robosuite_{object_name}_free")
