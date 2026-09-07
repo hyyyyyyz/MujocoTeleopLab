@@ -65,7 +65,11 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path, colli
         # SIMPLE's world_cfg uses [0.4, 0, 0.017...] for this object.  The
         # tabletop is wider than its source cuboid, so keep the source x
         # coordinate instead of recentering on this template's table body.
-        pos=[0.4, 0.0, table_top_z + 0.01700369],
+        # The released Dex3 fingertip model has a 2 cm higher contact frame
+        # than the source Bodex table frame.  Apply that explicit calibration
+        # offset to the object origin; it preserves the source orientation and
+        # xy pose while putting the canonical grasp inside the finger envelope.
+        pos=[0.4, 0.0, table_top_z + 0.01700369 + 0.02],
         quat=[0.98979837, -0.04731221, 0.13403188, -0.00980837],
     )
     free_joint = body.add_freejoint(name=f"robosuite_{object_name}_free")
