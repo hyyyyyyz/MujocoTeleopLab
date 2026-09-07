@@ -36,6 +36,7 @@ def main() -> int:
         default=None,
         help="Optional comma-separated full-vector permutation, e.g. SIMPLE's Dex3 [0..9,13,14,15,16,10,11,12].",
     )
+    parser.add_argument("--object-offset", nargs=3, type=float, default=(0.0, 0.0, 0.0), metavar=("DX", "DY", "DZ"))
     args = parser.parse_args()
 
     runtime = SceneTeleopRuntime(scene_xml=args.scene_xml)
@@ -55,12 +56,14 @@ def main() -> int:
     }
     finger_geoms = set(attachment._finger_geom_ids)
     finger_bodies = set(attachment._finger_body_ids)
+    object_adr = int(model.jnt_qposadr[object_jid])
     print(f"object body={object_body} geoms={object_geoms}")
     print("finger bodies:", [(b, mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, b)) for b in sorted(finger_bodies)])
     print("finger geoms:", [(g, mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, g)) for g in sorted(finger_geoms)])
 
     for phase in ("pregrasp", "grasp", "squeeze", "lift"):
         runtime.reset()
+        data.qpos[object_adr : object_adr + 3] += np.asarray(args.object_offset, dtype=np.float64)
         target = getattr(record, phase)
         for name, value in target.items():
             if name in runtime._qpos_adr:
