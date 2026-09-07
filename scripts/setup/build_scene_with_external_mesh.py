@@ -14,7 +14,7 @@ from pathlib import Path
 import sys
 
 
-def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path) -> Path:
+def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path, collision_dir: Path | None = None) -> Path:
     import mujoco
 
     base = root / "third_party/decoupled_wbc/control/robot_model/model_data/g1/pnp_cube_43dof.xml"
@@ -39,6 +39,15 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path) -> Pa
     spec.worldbody.bodies.remove(cube)
     mesh_name = f"robosuite_{object_name}_visual"
     spec.add_mesh(name=mesh_name, file=str(mesh))
+    if collision_dir is None:
+        candidate = mesh.parent
+        collision_dir = candidate if any(candidate.glob("convex_piece_*.obj")) else None
+    collision_meshes: list[str] = []
+    if collision_dir is not None:
+        for index, collision_mesh in enumerate(sorted(collision_dir.glob("convex_piece_*.obj"))):
+            name = f"{object_name}_collision_{index:03d}"
+            spec.add_mesh(name=name, file=str(collision_mesh))
+            collision_meshes.append(name)
 
     table_body = next((body for body in spec.worldbody.bodies if body.name == "table_body"), None)
     if table_body is None:
@@ -51,13 +60,12 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path) -> Pa
     # SIMPLE's world_cfg pose is expressed with the table's top at z=0.  The
     # external object is translated by this scene's tabletop height while its
     # xy and wxyz orientation are retained exactly.
-    table_x = float(table_body.pos[0])
     body = spec.worldbody.add_body(
         name=f"robosuite_{object_name}_body",
-        # SIMPLE's world_cfg places this object at the centre of its table
-        # ([0.4, 0, ...]); this template's table centre is x=0.6.  Preserve
-        # that table-relative pose instead of copying the absolute x value.
-        pos=[table_x, 0.0, table_top_z + 0.01700369],
+        # SIMPLE's world_cfg uses [0.4, 0, 0.017...] for this object.  The
+        # tabletop is wider than its source cuboid, so keep the source x
+        # coordinate instead of recentering on this template's table body.
+        pos=[0.4, 0.0, table_top_z + 0.01700369],
         quat=[0.98979837, -0.04731221, 0.13403188, -0.00980837],
     )
     free_joint = body.add_freejoint(name=f"robosuite_{object_name}_free")
@@ -67,11 +75,31 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path) -> Pa
         type=mujoco.mjtGeom.mjGEOM_MESH,
         meshname=mesh_name,
         rgba=[0.72, 0.52, 0.22, 1.0],
-        density=120.0,
-        friction=[0.95, 0.3, 0.1],
-        solimp=[0.998, 0.998, 0.001, 0.5, 2.0],
-        solref=[0.001, 1.0],
+        contype=0,
+        conaffinity=0,
+        density=0.0,
     )
+    if collision_meshes:
+        for index, name in enumerate(collision_meshes):
+            body.add_geom(
+                name=f"robosuite_{object_name}_collision_{index:03d}",
+                type=mujoco.mjtGeom.mjGEOM_MESH,
+                meshname=name,
+                density=120.0,
+                friction=[0.95, 0.3, 0.1],
+                solimp=[0.998, 0.998, 0.001, 0.5, 2.0],
+                solref=[0.001, 1.0],
+            )
+    else:
+        body.add_geom(
+            name=f"robosuite_{object_name}_collision",
+            type=mujoco.mjtGeom.mjGEOM_MESH,
+            meshname=mesh_name,
+            density=120.0,
+            friction=[0.95, 0.3, 0.1],
+            solimp=[0.998, 0.998, 0.001, 0.5, 2.0],
+            solref=[0.001, 1.0],
+        )
     output = output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     xml = spec.to_xml()
@@ -83,12 +111,13 @@ def build_scene(root: Path, *, mesh: Path, object_name: str, output: Path) -> Pa
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mesh", type=Path, required=True)
+    parser.add_argument("--collision-dir", type=Path, default=None)
     parser.add_argument("--object-name", default="toy_rhinocero")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        path = build_scene(args.root.resolve(), mesh=args.mesh, object_name=args.object_name, output=args.output)
+        path = build_scene(args.root.resolve(), mesh=args.mesh, object_name=args.object_name, output=args.output, collision_dir=args.collision_dir)
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"External-mesh scene build failed: {exc}", file=sys.stderr)
         return 1
