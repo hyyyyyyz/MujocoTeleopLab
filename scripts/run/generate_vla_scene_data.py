@@ -428,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.write(json.dumps({
                 "episode_index": index,
                 "scene": args.scene,
-                "task": f"pick up the {args.scene} and place it to the right",
+                "task": f"pick up the {object_name} and place it to the right",
                 **metrics,
                 "duration_s": round(time.time() - started, 3),
                 "data": f"episode_{index:06d}.npz",
