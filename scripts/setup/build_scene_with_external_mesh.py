@@ -47,9 +47,6 @@ def build_scene(
     spec.worldbody.bodies.remove(cube)
     mesh_name = f"robosuite_{object_name}_visual"
     spec.add_mesh(name=mesh_name, file=str(mesh))
-    if collision_dir is None:
-        candidate = mesh.parent
-        collision_dir = candidate if any(candidate.glob("convex_piece_*.obj")) else None
     collision_meshes: list[str] = []
     if collision_dir is not None:
         for index, collision_mesh in enumerate(sorted(collision_dir.glob("convex_piece_*.obj"))):

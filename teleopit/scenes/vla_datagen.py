@@ -67,12 +67,18 @@ class KinematicObjectAttachment:
         self._finger_body_ids = tuple(
             int(candidate)
             for name in (
-                "left_hand_index_1_link",
-                "left_hand_middle_1_link",
-                "left_hand_thumb_2_link",
                 "right_hand_index_1_link",
                 "right_hand_middle_1_link",
                 "right_hand_thumb_2_link",
+                # Activated-finger Dex3 meshes may make contact on the palm
+                # or proximal phalanx before the distal body enters the
+                # manifold.  Count the complete right-hand subtree as a real
+                # hand/object contact; success still requires dynamic lift,
+                # so this does not turn a push into a valid grasp.
+                "right_hand_index_0_link",
+                "right_hand_middle_0_link",
+                "right_hand_thumb_1_link",
+                "right_hand_palm_link",
             )
             if (candidate := mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)) >= 0
         )
