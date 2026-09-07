@@ -162,9 +162,14 @@ def place_object_on_table(
         raise ValueError(f"scene is missing object free joint {joint_name!r}")
     object_body = int(model.jnt_bodyid[joint_id])
     object_geom_ids = [geom_id for geom_id in range(model.ngeom) if int(model.geom_bodyid[geom_id]) == object_body]
+    collision_geoms = [
+        geom_id
+        for geom_id in object_geom_ids
+        if int(model.geom_contype[geom_id]) != 0 or int(model.geom_conaffinity[geom_id]) != 0
+    ]
     collision_geom = next(
-        (geom_id for geom_id in object_geom_ids if str(model.geom(geom_id).name).endswith("_collision")),
-        object_geom_ids[0] if object_geom_ids else None,
+        (geom_id for geom_id in collision_geoms if str(model.geom(geom_id).name).endswith("_collision")),
+        collision_geoms[0] if collision_geoms else (object_geom_ids[0] if object_geom_ids else None),
     )
     table_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "table_body")
     table_geom = next(
@@ -185,41 +190,34 @@ def place_object_on_table(
     # the mesh so SIMPLE/Bodex objects are placed on the tabletop rather than
     # intersecting it or floating above it.
     mesh_offsets: np.ndarray | None = None
-    if int(model.geom_type[collision_geom]) == int(mujoco.mjtGeom.mjGEOM_MESH):
-        mesh_id = int(model.geom_dataid[collision_geom])
-        if mesh_id >= 0:
+    if any(int(model.geom_type[g]) == int(mujoco.mjtGeom.mjGEOM_MESH) for g in collision_geoms):
+        local_points: list[np.ndarray] = []
+        for geom_id in collision_geoms:
+            geom_type = int(model.geom_type[geom_id])
+            if geom_type != int(mujoco.mjtGeom.mjGEOM_MESH):
+                continue
+            mesh_id = int(model.geom_dataid[geom_id])
+            if mesh_id < 0:
+                continue
             start = int(model.mesh_vertadr[mesh_id])
             count = int(model.mesh_vertnum[mesh_id])
             vertices = np.asarray(model.mesh_vert[start : start + count], dtype=np.float64)
             mesh_rot = Rotation.from_quat(
-                [
-                    model.mesh_quat[mesh_id, 1],
-                    model.mesh_quat[mesh_id, 2],
-                    model.mesh_quat[mesh_id, 3],
-                    model.mesh_quat[mesh_id, 0],
-                ]
+                [model.mesh_quat[mesh_id, 1], model.mesh_quat[mesh_id, 2], model.mesh_quat[mesh_id, 3], model.mesh_quat[mesh_id, 0]]
             )
             geom_rot = Rotation.from_quat(
-                [
-                    model.geom_quat[collision_geom, 1],
-                    model.geom_quat[collision_geom, 2],
-                    model.geom_quat[collision_geom, 3],
-                    model.geom_quat[collision_geom, 0],
-                ]
+                [model.geom_quat[geom_id, 1], model.geom_quat[geom_id, 2], model.geom_quat[geom_id, 3], model.geom_quat[geom_id, 0]]
             )
-            mesh_offsets = geom_rot.apply(mesh_rot.apply(vertices) + np.asarray(model.mesh_pos[mesh_id])) + np.asarray(model.geom_pos[collision_geom])
+            local_points.append(
+                geom_rot.apply(mesh_rot.apply(vertices) + np.asarray(model.mesh_pos[mesh_id]))
+                + np.asarray(model.geom_pos[geom_id])
+            )
+        if local_points:
+            mesh_offsets = np.concatenate(local_points, axis=0)
             rotated = Rotation.from_quat(
-                [
-                    data.qpos[object_qpos + 4],
-                    data.qpos[object_qpos + 5],
-                    data.qpos[object_qpos + 6],
-                    data.qpos[object_qpos + 3],
-                ]
+                [data.qpos[object_qpos + 4], data.qpos[object_qpos + 5], data.qpos[object_qpos + 6], data.qpos[object_qpos + 3]]
             ).apply(mesh_offsets)
-            object_half_extents = np.maximum(
-                np.max(np.abs(rotated), axis=0),
-                1.0e-4,
-            )
+            object_half_extents = np.maximum(np.max(np.abs(rotated), axis=0), 1.0e-4)
     margin = 0.005
     requested_xy = object_position[:2] + np.asarray(offset_xy, dtype=np.float64)
     object_position[:2] = np.clip(
@@ -231,19 +229,14 @@ def place_object_on_table(
     if mesh_offsets is None:
         bottom_offset = float(model.geom_size[collision_geom][2])
     else:
-        bottom_offset = float(
-            np.min(
-                Rotation.from_quat(
-                    [
-                        data.qpos[object_qpos + 4],
-                        data.qpos[object_qpos + 5],
-                        data.qpos[object_qpos + 6],
-                        data.qpos[object_qpos + 3],
-                    ]
-                ).apply(mesh_offsets)[:, 2]
-            )
-        )
-    data.qpos[object_qpos + 2] = table_height - bottom_offset + 0.002
+        # External Bodex scenes carry a canonical object pose in the generated
+        # XML.  Preserve that z instead of forcing the mesh's visual bounds to
+        # sit flush on the tabletop: SIMPLE's grasp pose was solved against
+        # this exact origin and intentionally allows a small table intersection
+        # in the convex decomposition.
+        bottom_offset = 0.0
+    if mesh_offsets is None:
+        data.qpos[object_qpos + 2] = table_height - bottom_offset + 0.002
     data.qvel[object_qvel : object_qvel + 6] = 0.0
     mujoco.mj_forward(model, data)
 
