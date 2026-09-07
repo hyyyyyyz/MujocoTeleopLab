@@ -180,6 +180,46 @@ def place_object_on_table(
     table_center = np.asarray(data.geom_xpos[table_geom], dtype=np.float64)
     table_half_extents = np.asarray(model.geom_size[table_geom], dtype=np.float64)
     object_half_extents = np.asarray(model.geom_size[collision_geom], dtype=np.float64)
+    # Mesh geoms do not expose a useful ``geom_size`` (MuJoCo stores an
+    # internal bounding sphere there).  Compute the actual oriented AABB of
+    # the mesh so SIMPLE/Bodex objects are placed on the tabletop rather than
+    # intersecting it or floating above it.
+    mesh_offsets: np.ndarray | None = None
+    if int(model.geom_type[collision_geom]) == int(mujoco.mjtGeom.mjGEOM_MESH):
+        mesh_id = int(model.geom_dataid[collision_geom])
+        if mesh_id >= 0:
+            start = int(model.mesh_vertadr[mesh_id])
+            count = int(model.mesh_vertnum[mesh_id])
+            vertices = np.asarray(model.mesh_vert[start : start + count], dtype=np.float64)
+            mesh_rot = Rotation.from_quat(
+                [
+                    model.mesh_quat[mesh_id, 1],
+                    model.mesh_quat[mesh_id, 2],
+                    model.mesh_quat[mesh_id, 3],
+                    model.mesh_quat[mesh_id, 0],
+                ]
+            )
+            geom_rot = Rotation.from_quat(
+                [
+                    model.geom_quat[collision_geom, 1],
+                    model.geom_quat[collision_geom, 2],
+                    model.geom_quat[collision_geom, 3],
+                    model.geom_quat[collision_geom, 0],
+                ]
+            )
+            mesh_offsets = geom_rot.apply(mesh_rot.apply(vertices) + np.asarray(model.mesh_pos[mesh_id])) + np.asarray(model.geom_pos[collision_geom])
+            rotated = Rotation.from_quat(
+                [
+                    data.qpos[object_qpos + 4],
+                    data.qpos[object_qpos + 5],
+                    data.qpos[object_qpos + 6],
+                    data.qpos[object_qpos + 3],
+                ]
+            ).apply(mesh_offsets)
+            object_half_extents = np.maximum(
+                np.max(np.abs(rotated), axis=0),
+                1.0e-4,
+            )
     margin = 0.005
     requested_xy = object_position[:2] + np.asarray(offset_xy, dtype=np.float64)
     object_position[:2] = np.clip(
@@ -188,7 +228,22 @@ def place_object_on_table(
         table_center[:2] + table_half_extents[:2] - object_half_extents[:2] - margin,
     )
     data.qpos[object_qpos : object_qpos + 2] = object_position[:2]
-    data.qpos[object_qpos + 2] = table_height + float(model.geom_size[collision_geom][2]) + 0.002
+    if mesh_offsets is None:
+        bottom_offset = float(model.geom_size[collision_geom][2])
+    else:
+        bottom_offset = float(
+            np.min(
+                Rotation.from_quat(
+                    [
+                        data.qpos[object_qpos + 4],
+                        data.qpos[object_qpos + 5],
+                        data.qpos[object_qpos + 6],
+                        data.qpos[object_qpos + 3],
+                    ]
+                ).apply(mesh_offsets)[:, 2]
+            )
+        )
+    data.qpos[object_qpos + 2] = table_height - bottom_offset + 0.002
     data.qvel[object_qvel : object_qvel + 6] = 0.0
     mujoco.mj_forward(model, data)
 
